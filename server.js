@@ -9,9 +9,9 @@ const crypto = require("crypto");
 const { spawn } = require("child_process");
 
 const host = "127.0.0.1";
-const publicPort = 4096;
+const publicPort = Number(process.env.SENESCHAL_PORT) || 4196;
 const upstreamPort = 4097;
-const classicPort = 4098;
+const classicPort = Number(process.env.SENESCHAL_CLASSIC_PORT) || 4198;
 const blenderPort = 9876;
 const testedOpenCodeVersion = "1.18.21";
 const installDirectory = __dirname;
@@ -87,7 +87,46 @@ const securityHeaders = {
 let upstream = null;
 let proxy = null;
 let classicProxy = null;
+let serversStarting = false;
 let shuttingDown = false;
+const instanceLockFile = path.join(dataDirectory, "seneschal-instance.lock");
+let ownsInstanceLock = false;
+
+function processIsRunning(processId) {
+  if (!Number.isInteger(processId) || processId <= 0) return false;
+  try { process.kill(processId, 0); return true; } catch { return false; }
+}
+
+function acquireInstanceLock() {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = fs.openSync(instanceLockFile, "wx");
+      fs.writeFileSync(descriptor, String(process.pid), "utf8");
+      fs.closeSync(descriptor);
+      ownsInstanceLock = true;
+      return true;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      let existingProcessId = 0;
+      try { existingProcessId = Number.parseInt(fs.readFileSync(instanceLockFile, "utf8").trim(), 10); } catch {}
+      if (processIsRunning(existingProcessId)) return false;
+      try { fs.unlinkSync(instanceLockFile); } catch {}
+    }
+  }
+  return false;
+}
+
+function releaseInstanceLock() {
+  if (!ownsInstanceLock) return;
+  ownsInstanceLock = false;
+  try { fs.unlinkSync(instanceLockFile); } catch {}
+}
+
+if (!acquireInstanceLock()) {
+  console.log("Seneschal is already starting or running.");
+  process.exit(0);
+}
+process.on("exit", releaseInstanceLock);
 
 function parseCookies(request) {
   return Object.fromEntries(String(request.headers.cookie || "").split(";").map((part) => part.trim().split("=")).filter((pair) => pair.length === 2));
@@ -676,6 +715,21 @@ function scheduleWeeklyBackup() {
   child.unref();
 }
 
+function listenWithRetry(server, port, label) {
+  let retries = 0;
+  server.on("error", (error) => {
+    if (error.code === "EADDRINUSE" && retries < 40 && !shuttingDown) {
+      retries += 1;
+      console.log(`${label} port ${port} is busy; retrying (${retries}/40).`);
+      setTimeout(() => server.listen(port, host), 250);
+      return;
+    }
+    console.error(error.code === "EADDRINUSE" ? `${label} port ${port} remained busy.` : error.message);
+    shutdown(1);
+  });
+  server.listen(port, host);
+}
+
 function startCustomProxy() {
   proxy = http.createServer((request, response) => {
     const pathname = new URL(request.url, `http://${request.headers.host || `${host}:${publicPort}`}`).pathname;
@@ -710,12 +764,11 @@ function startCustomProxy() {
     if (!isAuthorized(request)) return socket.destroy();
     proxyUpgrade(request, socket, head, true);
   });
-  proxy.on("error", (error) => {
-    if (error.code === "EADDRINUSE") console.error(`Port ${publicPort} is already in use.`);
-    else console.error(error.message);
-    shutdown(1);
+  proxy.once("listening", () => {
+    startClassicProxy();
+    openWorkspace();
   });
-  proxy.listen(publicPort, host, openWorkspace);
+  listenWithRetry(proxy, publicPort, "Workspace");
 }
 
 function startClassicProxy() {
@@ -728,7 +781,7 @@ function startClassicProxy() {
     if (!isAuthorized(request)) return socket.destroy();
     proxyUpgrade(request, socket, head, false);
   });
-  classicProxy.listen(classicPort, host);
+  listenWithRetry(classicProxy, classicPort, "Classic OpenCode");
 }
 
 function openWorkspace() {
@@ -748,8 +801,8 @@ function openWorkspace() {
 }
 
 function startServers() {
-  if (proxy) return;
-  startClassicProxy();
+  if (proxy || serversStarting) return;
+  serversStarting = true;
   startCustomProxy();
 }
 

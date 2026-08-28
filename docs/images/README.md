@@ -1,10 +1,10 @@
-# Documentation images
+# Public product visuals
 
-Put public, privacy-safe screenshots and short demos here. Reference them from the repository README with relative Markdown paths.
+Only public, privacy-safe product visuals and demos belong here. Reference them from the repository README with relative Markdown paths.
 
-Recommended names:
+Current assets:
 
-- `seneschal-workspace-night.png`
-- `seneschal-workspace-day.png`
-- `seneschal-instructions-studio.png`
-- `seneschal-demo.webp`
+- `seneschal-workspace-night.svg` — editable source artwork
+- `seneschal-workspace-night.png` — README-ready export
+
+The workspace image is an accurate product illustration, not a literal user-session screenshot. This keeps provider names, prompts, projects, and personal files out of the public repository.

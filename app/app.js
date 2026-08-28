@@ -36,6 +36,10 @@
     customDirectories: storage.get("atelier-projects", []),
     eventSource: null,
     eventCount: 0,
+    ambientEventCount: 0,
+    pulseBucketStart: Math.floor(Date.now() / 6000) * 6000,
+    pulseBuckets: Array.from({ length: 10 }, () => ({ work: 0, ambient: 0 })),
+    pulseTimer: null,
     logs: [],
     commandItems: [],
     openCodeCommands: [],
@@ -76,7 +80,7 @@
     agent: $("#agentSelect"), modelVariant: $("#modelVariantSelect"), modelVariantWrap: $("#modelVariantWrap"), attachmentStrip: $("#attachmentStrip"), fileInput: $("#fileInput"), mic: $("#micButton"), talk: $("#talkButton"),
     policyList: $("#policyList"), toolGrid: $("#toolGrid"), toolCount: $("#toolCount"),
     providerList: $("#providerList"), providerCount: $("#providerCount"), inspectorAgent: $("#inspectorAgent"),
-    eventCount: $("#eventCount"), version: $("#versionText"), pulse: $(".pulse-bars"), pulseLabel: $("#pulseLabel"),
+    eventCount: $("#eventCount"), eventRate: $("#eventRate"), ambientRate: $("#ambientRate"), version: $("#versionText"), pulse: $(".pulse-bars"), pulseLabel: $("#pulseLabel"),
     usagePercent: $("#usagePercent"), usageMeter: $("#usageMeter"), usageDetail: $("#usageDetail"),
     permissionDock: $("#permissionDock"), projectDialog: $("#projectDialog"), projectForm: $("#projectForm"),
     projectPath: $("#projectPathInput"), projectError: $("#projectError"),
@@ -233,14 +237,55 @@
   }
 
   function log(type, detail = "") {
-    state.eventCount += 1;
     state.logs.unshift({ time: new Date(), type, detail: typeof detail === "string" ? detail : JSON.stringify(detail) });
     state.logs = state.logs.slice(0, 120);
-    els.eventCount.textContent = String(state.eventCount);
-    els.pulse.classList.add("active");
-    clearTimeout(log.pulseTimer);
-    log.pulseTimer = setTimeout(() => els.pulse.classList.remove("active"), 1200);
     if (els.protocolDialog.open) renderProtocol();
+  }
+
+  function advancePulse(now = Date.now()) {
+    const bucketStart = Math.floor(now / 6000) * 6000;
+    const elapsedBuckets = Math.floor((bucketStart - state.pulseBucketStart) / 6000);
+    if (elapsedBuckets <= 0) return;
+    const steps = Math.min(10, elapsedBuckets);
+    for (let index = 0; index < steps; index += 1) {
+      state.pulseBuckets.shift();
+      state.pulseBuckets.push({ work: 0, ambient: 0 });
+    }
+    state.pulseBucketStart = bucketStart;
+  }
+
+  function pulseEventKind(payload) {
+    const type = String(payload?.type || "");
+    const rawStatus = payload?.properties?.status;
+    const status = typeof rawStatus === "string" ? rawStatus : String(rawStatus?.type || rawStatus?.status || "");
+    if (type === "session.status") return ["busy", "retry"].includes(status) ? "work" : "ambient";
+    if (/^(message\.part\.|message\.updated|permission\.|question\.|todo\.)/.test(type)) return "work";
+    return "ambient";
+  }
+
+  function renderPulse() {
+    advancePulse();
+    [...els.pulse.children].forEach((bar, index) => {
+      const bucket = state.pulseBuckets[index];
+      const workHeight = bucket.work ? Math.min(100, 18 + Math.round(Math.log2(bucket.work + 1) * 28)) : 5;
+      bar.style.setProperty("--pulse-height", `${workHeight}%`);
+      bar.classList.toggle("has-work", bucket.work > 0);
+      bar.classList.toggle("has-ambient", bucket.ambient > 0);
+      bar.classList.toggle("latest", index === state.pulseBuckets.length - 1);
+      bar.title = `${bucket.work} work event${bucket.work === 1 ? "" : "s"}; ${bucket.ambient} ambient event${bucket.ambient === 1 ? "" : "s"} in this fixed 6-second interval`;
+    });
+    els.eventRate.textContent = String(state.pulseBuckets.reduce((sum, bucket) => sum + bucket.work, 0));
+    els.ambientRate.textContent = String(state.pulseBuckets.reduce((sum, bucket) => sum + bucket.ambient, 0));
+    els.eventCount.textContent = String(state.eventCount);
+  }
+
+  function recordOpenCodeEvent(payload) {
+    advancePulse();
+    const kind = pulseEventKind(payload);
+    state.pulseBuckets[state.pulseBuckets.length - 1][kind] += 1;
+    if (kind === "work") state.eventCount += 1;
+    else state.ambientEventCount += 1;
+    renderPulse();
   }
 
   function toast(message, kind = "") {
@@ -1772,6 +1817,7 @@
     source.onmessage = (event) => {
       let payload;
       try { payload = JSON.parse(event.data); } catch { return; }
+      recordOpenCodeEvent(payload);
       log(payload.type || "event", payload.properties?.sessionID || payload.id || "");
       const properties = payload.properties || {};
       if (payload.type === "session.status") {
@@ -2500,7 +2546,7 @@
     [els.projectDialog, els.settingsDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.messageEditDialog, els.browserDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
     els.instructionDialog.addEventListener("click", (event) => { if (event.target === els.instructionDialog) closeInstructionStudio(); });
     document.addEventListener("visibilitychange", syncMotionState);
-    window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); });
+    window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); });
   }
 
   async function init() {
@@ -2514,6 +2560,8 @@
     syncMotionState();
     bindEvents();
     autoSizePrompt();
+    renderPulse();
+    state.pulseTimer = setInterval(renderPulse, 2000);
     requestAnimationFrame(pixelCityLoop);
     await refreshAll();
     state.permissionTimer = setInterval(pollPermissions, 1200);

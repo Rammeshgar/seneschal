@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Seneschal — your private AI atelier</title>
+  <desc id="description">A dark architectural launch graphic for Seneschal, a local-first OpenCode workspace for Windows and WSL.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#05070b"/><stop offset="1" stop-color="#0d171b"/></linearGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#57e6d9"/><stop offset=".58" stop-color="#8bb8ff"/><stop offset="1" stop-color="#ffb45e"/></linearGradient>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M44 0H0V44" fill="none" stroke="#33423a" opacity=".22"/></pattern>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".45"/></filter>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+  <circle cx="1040" cy="110" r="290" fill="#57e6d9" opacity=".04"/>
+  <path d="M0 598h1280" stroke="url(#signal)" stroke-width="4"/>
+  <g transform="translate(76 68) scale(.72)">
+    <rect x="4" y="4" width="120" height="120" rx="28" fill="#101713" stroke="#33423a" stroke-width="4"/>
+    <path fill="#9db39f" d="M20 20h40v46H32c-6.6 0-12-5.4-12-12V20Z"/><path fill="none" stroke="#101713" stroke-width="11" stroke-linecap="round" d="M28 29c0 16 24 10 24 28"/>
+    <path fill="#9db39f" d="M68 20h28c6.6 0 12 5.4 12 12v34H68V20Z"/><path fill="#101713" d="M74 44c9.6 1.4 17.4 8.3 20 17.4V66H82.1c-1.9-6.5-6.8-11.8-13.1-14.3V44.5c1.7-.4 3.3-.6 5-.5ZM108 42.3v9.1C101.6 54 96.8 59.4 95 66H83.1c2.6-12 12.4-21.4 24.9-23.7Z"/><circle cx="88" cy="35" r="8" fill="#d8ae58"/>
+    <path fill="#9db39f" fill-rule="evenodd" d="M20 74h40v34H32c-6.6 0-12-5.4-12-12V74Zm12 10v12h16V84H32Z"/><path fill="#9db39f" d="M68 74h40v34H80c-6.6 0-12-5.4-12-12V74Z"/><path fill="none" stroke="#101713" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" d="m77 99 11-13 12 11M88 86v17"/>
+  </g>
+  <text x="188" y="116" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="36" font-weight="780">Seneschal</text>
+  <text x="190" y="145" fill="#7f918b" font-family="ui-monospace,Consolas,monospace" font-size="13" font-weight="700" letter-spacing="3">YOUR PRIVATE AI ATELIER</text>
+  <text x="76" y="264" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="64" font-weight="780" letter-spacing="-2">One calm workspace.</text>
+  <text x="76" y="332" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="64" font-weight="780" letter-spacing="-2">Models, tools, and control.</text>
+  <text x="80" y="386" fill="#9db39f" font-family="Inter,Segoe UI,sans-serif" font-size="23">A local-first OpenCode interface for Windows + WSL.</text>
+  <g transform="translate(80 442)" font-family="ui-monospace,Consolas,monospace" font-size="13" font-weight="700">
+    <rect width="140" height="44" rx="9" fill="#111a20" stroke="#3a514c"/><circle cx="22" cy="22" r="5" fill="#57e6d9"/><text x="38" y="27" fill="#9db39f">PLAN / BUILD</text>
+    <rect x="154" width="164" height="44" rx="9" fill="#111a20" stroke="#3a514c"/><circle cx="176" cy="22" r="5" fill="#ffb45e"/><text x="192" y="27" fill="#9db39f">APPROVAL FIRST</text>
+    <rect x="332" width="142" height="44" rx="9" fill="#111a20" stroke="#3a514c"/><circle cx="354" cy="22" r="5" fill="#8bb8ff"/><text x="370" y="27" fill="#9db39f">LOCAL BRIDGES</text>
+  </g>
+  <g transform="translate(840 174)" filter="url(#shadow)">
+    <rect width="356" height="310" rx="18" fill="#0e141d" stroke="#33423a" stroke-width="2"/>
+    <rect x="22" y="22" width="312" height="48" rx="9" fill="#111a20" stroke="#3a514c"/><circle cx="44" cy="46" r="6" fill="#57e6d9"/><text x="62" y="52" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="15" font-weight="700">Choose your model</text>
+    <text x="24" y="108" fill="#57e6d9" font-family="ui-monospace,Consolas,monospace" font-size="10" font-weight="700" letter-spacing="1.5">AGENT CONTEXT</text>
+    <text x="24" y="137" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="19" font-weight="750">Seneschal · Build</text>
+    <g font-family="ui-monospace,Consolas,monospace" font-size="10" font-weight="700"><rect x="22" y="158" width="312" height="38" rx="7" fill="#090f14"/><circle cx="40" cy="177" r="4" fill="#57e6d9"/><text x="54" y="181" fill="#9db39f">read</text><text x="286" y="181" fill="#57e6d9">ALLOW</text><rect x="22" y="204" width="312" height="38" rx="7" fill="#090f14"/><circle cx="40" cy="223" r="4" fill="#ffb45e"/><text x="54" y="227" fill="#9db39f">edit</text><text x="298" y="227" fill="#ffb45e">ASK</text></g>
+    <g transform="translate(22 266)"><g fill="#14736b"><rect y="12" width="20" height="14" rx="2"/><rect x="58" y="2" width="20" height="24" rx="2"/><rect x="116" y="16" width="20" height="10" rx="2"/><rect x="174" y="7" width="20" height="19" rx="2"/><rect x="232" y="12" width="20" height="14" rx="2"/><rect x="290" width="20" height="26" rx="2"/></g><g fill="#ffb45e"><circle cx="39" cy="21" r="3"/><circle cx="97" cy="10" r="3"/><circle cx="155" cy="20" r="3"/><circle cx="213" cy="15" r="3"/><circle cx="271" cy="8" r="3"/></g></g>
+  </g>
+  <text x="80" y="560" fill="#62716d" font-family="ui-monospace,Consolas,monospace" font-size="12">OPEN SOURCE · LOCALHOST ONLY · PUBLIC BETA</text>
+</svg>

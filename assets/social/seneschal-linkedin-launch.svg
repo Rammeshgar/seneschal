@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 627" role="img" aria-labelledby="title description">
+  <title id="title">Introducing Seneschal</title>
+  <desc id="description">LinkedIn launch artwork for Seneschal, a private local-first AI workspace powered by OpenCode.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#05070b"/><stop offset="1" stop-color="#0c171a"/></linearGradient>
+    <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="#33423a" opacity=".2"/></pattern>
+  </defs>
+  <rect width="1200" height="627" fill="url(#bg)"/><rect width="1200" height="627" fill="url(#grid)"/>
+  <rect x="48" y="44" width="1104" height="539" rx="24" fill="#0a1016" stroke="#33423a"/>
+  <path d="M49 579h1102" stroke="#57e6d9" stroke-width="4"/>
+  <g transform="translate(82 82) scale(.58)"><rect x="4" y="4" width="120" height="120" rx="28" fill="#101713" stroke="#33423a" stroke-width="4"/><path fill="#9db39f" d="M20 20h40v46H32c-6.6 0-12-5.4-12-12V20Z"/><path fill="none" stroke="#101713" stroke-width="11" stroke-linecap="round" d="M28 29c0 16 24 10 24 28"/><path fill="#9db39f" d="M68 20h28c6.6 0 12 5.4 12 12v34H68V20Z"/><path fill="#101713" d="M74 44c9.6 1.4 17.4 8.3 20 17.4V66H82.1c-1.9-6.5-6.8-11.8-13.1-14.3V44.5c1.7-.4 3.3-.6 5-.5ZM108 42.3v9.1C101.6 54 96.8 59.4 95 66H83.1c2.6-12 12.4-21.4 24.9-23.7Z"/><circle cx="88" cy="35" r="8" fill="#d8ae58"/><path fill="#9db39f" fill-rule="evenodd" d="M20 74h40v34H32c-6.6 0-12-5.4-12-12V74Zm12 10v12h16V84H32Z"/><path fill="#9db39f" d="M68 74h40v34H80c-6.6 0-12-5.4-12-12V74Z"/></g>
+  <text x="172" y="122" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="30" font-weight="780">Seneschal</text><text x="174" y="148" fill="#7f918b" font-family="ui-monospace,Consolas,monospace" font-size="11" font-weight="700" letter-spacing="2.6">YOUR PRIVATE AI ATELIER</text>
+  <text x="82" y="256" fill="#57e6d9" font-family="ui-monospace,Consolas,monospace" font-size="15" font-weight="700" letter-spacing="2.4">PUBLIC BETA · OPEN SOURCE</text>
+  <text x="82" y="326" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="58" font-weight="780" letter-spacing="-1.6">I wanted one focused place</text>
+  <text x="82" y="390" fill="#f3f6f5" font-family="Inter,Segoe UI,sans-serif" font-size="58" font-weight="780" letter-spacing="-1.6">to work with AI agents.</text>
+  <text x="84" y="440" fill="#9db39f" font-family="Inter,Segoe UI,sans-serif" font-size="21">So I built a local-first OpenCode workspace for Windows + WSL.</text>
+  <g transform="translate(82 486)" font-family="ui-monospace,Consolas,monospace" font-size="12" font-weight="700"><text fill="#57e6d9">MODEL SWITCHING</text><circle cx="160" cy="-4" r="3" fill="#ffb45e"/><text x="178" fill="#9db39f">APPROVAL CONTROLS</text><circle cx="348" cy="-4" r="3" fill="#8bb8ff"/><text x="366" fill="#9db39f">SKILLS + INSTRUCTIONS</text><circle cx="575" cy="-4" r="3" fill="#ff6b62"/><text x="593" fill="#9db39f">BROWSER + BLENDER</text></g>
+  <g transform="translate(930 88)"><rect width="164" height="164" rx="82" fill="#57e6d9" opacity=".06"/><path d="M31 83h102M82 32v102" stroke="#57e6d9" opacity=".18"/><circle cx="82" cy="82" r="11" fill="#d8ae58"/><circle cx="82" cy="82" r="44" fill="none" stroke="#57e6d9" opacity=".38"/><path d="M82 38 123 68 107 118 57 118 41 68Z" fill="none" stroke="#8bb8ff" opacity=".5"/></g>
+  <text x="82" y="548" fill="#62716d" font-family="ui-monospace,Consolas,monospace" font-size="11">github.com/Rammeshgar/seneschal</text>
+</svg>

@@ -213,8 +213,10 @@
 
           <section class="inspector-block latency-block">
             <div class="block-title"><span>Workspace pulse</span><small id="pulseLabel">STANDBY</small></div>
-            <div class="pulse-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-            <div class="pulse-meta"><span>Events <strong id="eventCount">0</strong></span><span>Version <strong id="versionText">—</strong></span></div>
+            <div class="pulse-bars" aria-label="OpenCode work and ambient events during the last minute, shown in ten fixed six-second intervals"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="pulse-axis"><span>60 seconds ago</span><span>Now</span></div>
+            <div class="pulse-legend"><span class="work">Work</span><span class="ambient">Ambient</span></div>
+            <div class="pulse-meta"><span>Work · 60s <strong id="eventRate">0</strong></span><span>Ambient · 60s <strong id="ambientRate">0</strong></span><span>Session work <strong id="eventCount">0</strong></span><span>Engine <strong id="versionText">—</strong></span></div>
           </section>
 
           <button class="protocol-button" id="protocolButton"><span><i></i>Inspect protocol log</span><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>

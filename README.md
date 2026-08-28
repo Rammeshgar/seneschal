@@ -2,6 +2,8 @@
 
 **Your private AI atelier.**
 
+![Seneschal — one calm workspace for models, tools, and control](assets/social/seneschal-social-preview.png)
+
 Seneschal gives OpenCode a focused, personal interface on Windows and WSL: model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, attachments, voice input, optional browser and Blender status, and a matte day/night visual system.
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
@@ -15,6 +17,12 @@ This is a public beta. It is useful today, but it is not a replacement for under
 - A permission-oriented workspace where Plan is read-only and Build asks before changes by default
 
 It is not an AI model, a provider subscription, or a way around provider usage limits.
+
+## Interface
+
+![Privacy-safe illustration of the Seneschal night workspace](docs/images/seneschal-workspace-night.png)
+
+The image above is a privacy-safe product illustration based on the real interface. It shows the three-part workspace, approval controls, activity reporting, and local bridge status without exposing a user's sessions or provider account.
 
 ## Requirements
 
@@ -99,8 +107,8 @@ Seneschal is MIT licensed. OpenCode's license is included separately in `docs/OP
 
 ## Images and screenshots
 
-- Put README screenshots and demos in `docs/images/`.
-- Put reusable logos, social banners, and source artwork in `assets/`.
+- Public product visuals live in `docs/images/`.
+- Reusable logos, GitHub previews, LinkedIn artwork, and source files live in `assets/`.
 - Put images that must appear inside the running interface in `app/assets/`; reference them as `/workspace/assets/filename.webp`.
 
 Prefer WebP or AVIF for large interface backgrounds, PNG for screenshots, and SVG for logos. Do not place personal screenshots, API keys, browser profiles, or private session content in the public repository.
