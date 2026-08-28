@@ -1,13 +1,13 @@
 [CmdletBinding()]
 param(
   [string]$WslDistribution = 'Ubuntu',
-  [string]$InstallDirectory = (Join-Path $env:LOCALAPPDATA 'DigitalServant')
+  [string]$InstallDirectory = (Join-Path $env:LOCALAPPDATA 'Seneschal')
 )
 
 $ErrorActionPreference = 'Stop'
 $source = $PSScriptRoot
 
-if ($env:OS -ne 'Windows_NT') { throw 'Digital Servant currently supports Windows only.' }
+if ($env:OS -ne 'Windows_NT') { throw 'Seneschal currently supports Windows only.' }
 if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { throw 'Node.js 20 or newer is required: https://nodejs.org/' }
 $nodeMajor = [int]((& node.exe --version).TrimStart('v').Split('.')[0])
 if ($nodeMajor -lt 20) { throw 'Node.js 20 or newer is required: https://nodejs.org/' }
@@ -60,19 +60,19 @@ if (-not (Test-Path -LiteralPath $openCodeJson)) {
 }
 
 $desktop = [Environment]::GetFolderPath('Desktop')
-$shortcutPath = Join-Path $desktop 'Digital Servant.lnk'
+$shortcutPath = Join-Path $desktop 'Seneschal.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
 $shortcut.Arguments = '"' + (Join-Path $InstallDirectory 'scripts\launch.vbs') + '"'
 $shortcut.WorkingDirectory = $InstallDirectory
 $shortcut.IconLocation = (Join-Path $InstallDirectory 'app\favicon.ico') + ',0'
-$shortcut.Description = 'Open Digital Servant'
+$shortcut.Description = 'Open Seneschal'
 $shortcut.Save()
 
 Write-Host ''
-Write-Host 'Digital Servant is installed.' -ForegroundColor Green
+Write-Host 'Seneschal is installed.' -ForegroundColor Green
 Write-Host "Location: $InstallDirectory"
 Write-Host "Desktop shortcut: $shortcutPath"
 Write-Host 'Your existing OpenCode configuration was preserved.'
-Write-Host 'Open the app from the Digital Servant desktop shortcut.'
+Write-Host 'Open the app from the Seneschal desktop shortcut.'

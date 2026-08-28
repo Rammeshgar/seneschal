@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-beta.1 — 2026-08-28
+
+- Renamed the product from Digital Servant to Seneschal
+- Updated the agent identity, installer, desktop shortcut, interface copy, and public documentation
+- Added organized locations for brand assets, README screenshots, and runtime imagery
+- Added safe serving for local interface images under `/workspace/assets/`
+- Kept legacy local preference keys and environment variables readable during migration
+
 ## 0.1.0-beta.1 — 2026-08-28
 
 - First public beta

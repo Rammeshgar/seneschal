@@ -47,7 +47,7 @@
     mediaRecorder: null,
     mediaStream: null,
     mediaChunks: [],
-    conversationMode: storage.get("digital-servant-talk-mode", false),
+    conversationMode: storage.get("seneschal-talk-mode", storage.get("digital-servant-talk-mode", false)),
     conversationRecognition: null,
     conversationRestartTimer: null,
     voiceAwaitingResponse: false,
@@ -55,7 +55,7 @@
     lastSpokenMessageID: "",
     instructionData: null,
     instructionTab: "persona",
-    selectedSkills: storage.get("digital-servant-active-skills", []),
+    selectedSkills: storage.get("seneschal-active-skills", storage.get("digital-servant-active-skills", [])),
     activeSkillKey: "",
     archiveSkillArmed: false,
     inspectedSkillSource: "",
@@ -99,7 +99,7 @@
   };
 
   const instructionDefaults = {
-    persona: `# Digital Servant\n\nYou are Digital Servant, a precise, discreet, and capable digital steward.\n\n- Address the user naturally as **My Lord** or **My Liege**, usually once per response. Do not repeat the title mechanically in every paragraph.\n- Roleplay must never override accuracy, safety, permissions, or the user's explicit instructions.\n`,
+    persona: `# Seneschal\n\nYou are Seneschal, a precise, discreet, and capable private AI steward.\n\n- Address the user naturally as **My Lord** or **My Liege**, usually once per response. Do not repeat the title mechanically in every paragraph.\n- Roleplay must never override accuracy, safety, permissions, or the user's explicit instructions.\n`,
     general: `# General Instructions\n\n- Be candid, practical, and direct. Never flatter the user at the expense of truth.\n- Lead with the outcome and explain technical matters in clear, non-technical language unless detail is requested.\n- Protect the user's privacy, data, money, and control. Never weaken permission checks or conceal costs.\n- Ask before consequential actions whenever the configured permission policy requires it.\n- Preserve existing user work and keep changes tightly within the requested scope.\n- Verify completed work in proportion to its risk and report important limitations honestly.\n`,
     project: `# Project Instructions\n\n## Purpose\nDescribe what this project is for and what success looks like.\n\n## Structure\nList important folders, files, applications, or services.\n\n## Working Rules\n- Preserve existing work.\n- Ask before destructive or external actions.\n- Verify changes before declaring completion.\n\n## Commands and Tests\nList the preferred setup, test, and validation steps.\n\n## Do Not Change\nList files, systems, visual choices, or behavior that must remain untouched.\n`
   };
@@ -743,7 +743,7 @@
   }
 
   function agentDisplayName(name = "build") {
-    const labels = { build: "Digital Servant · Build", plan: "Digital Servant · Plan", chat: "Digital Servant · Chat" };
+    const labels = { build: "Seneschal · Build", plan: "Seneschal · Plan", chat: "Seneschal · Chat" };
     return labels[name] || name.split(/[-_]/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
   }
 
@@ -937,7 +937,7 @@
     $$('[data-skill-toggle]', els.skillList).forEach((checkbox) => checkbox.addEventListener("change", () => {
       const key = checkbox.dataset.skillToggle;
       state.selectedSkills = checkbox.checked ? [...new Set([...state.selectedSkills, key])] : state.selectedSkills.filter((item) => item !== key);
-      storage.set("digital-servant-active-skills", state.selectedSkills);
+      storage.set("seneschal-active-skills", state.selectedSkills);
       renderActiveSkillCount();
       renderInstructionStack();
     }));
@@ -987,7 +987,7 @@
     els.skillScope.querySelector('option[value="project"]').disabled = !data.project?.available;
     if (!data.project?.available && els.skillScope.value === "project") els.skillScope.value = "global";
     state.selectedSkills = state.selectedSkills.filter((key) => !key.startsWith("project:") || (data.skills || []).some((skill) => skillKey(skill) === key));
-    storage.set("digital-servant-active-skills", state.selectedSkills);
+    storage.set("seneschal-active-skills", state.selectedSkills);
     renderInstructionCounts();
     renderSkills();
     renderInstructionStack();
@@ -1147,7 +1147,7 @@
     try {
       const result = await workspace("/workspace/skills/archive", { method: "POST", body: { id: skill.id, scope: skill.scope, directory: state.currentDirectory } });
       state.selectedSkills = state.selectedSkills.filter((key) => key !== state.activeSkillKey);
-      storage.set("digital-servant-active-skills", state.selectedSkills);
+      storage.set("seneschal-active-skills", state.selectedSkills);
       state.instructionData = result.snapshot;
       newSkill();
       populateInstructionEditors();
@@ -1162,7 +1162,7 @@
     const role = state.selectedAgent.includes("plan") ? "plan" : "build";
     const sections = [];
     const roleText = data.roles?.[role]?.trim();
-    if (roleText) sections.push(`Digital Servant ${role} role instructions:\n${roleText}`);
+    if (roleText) sections.push(`Seneschal ${role} role instructions:\n${roleText}`);
     const skills = currentActiveSkills();
     if (skills.length) sections.push(`For this request, use the OpenCode skill tool to load and follow these exact skills: ${[...new Set(skills.map((skill) => skill.id))].join(", ")}.`);
     return sections.join("\n\n");
@@ -1249,7 +1249,7 @@
       const providerError = info.error?.data?.message || info.error?.message || "";
       const parts = (message.parts || []).map(renderPart).filter(Boolean).join("") || (providerError ? `<div class="provider-error-message"><strong>Provider error</strong><span>${escapeHTML(providerError)}</span></div>` : "");
       if (!parts) return "";
-      const label = role === "user" ? "You" : `Digital Servant · ${info.modelID || agentDisplayName(info.agent || state.selectedAgent)}`;
+      const label = role === "user" ? "You" : `Seneschal · ${info.modelID || agentDisplayName(info.agent || state.selectedAgent)}`;
       const avatar = role === "user" ? "YOU" : "DS";
       const kind = role === "user" ? "input" : "output";
       const userActions = role === "user" ? '<button type="button" class="message-edit-button" aria-label="Edit this message" title="Edit and retry this message">Edit</button><button type="button" class="message-retry-button" aria-label="Retry this message" title="Retry from this point">Retry</button>' : "";
@@ -1324,7 +1324,7 @@
     const visible = state.messages.filter((message) => (message.parts || []).some((part) => ["text", "tool", "reasoning", "file", "patch"].includes(part.type)));
     els.messageMap.hidden = visible.length < 2;
     els.messageMap.innerHTML = visible.map((message, index) => {
-      const role = message.info?.role === "user" ? "You" : "Digital Servant";
+      const role = message.info?.role === "user" ? "You" : "Seneschal";
       return `<button type="button" class="message-map-step ${message.info?.role === "user" ? "user" : "assistant"}" data-jump-message="${escapeHTML(message.info?.id || "")}" aria-label="Jump to ${escapeHTML(role)} message ${index + 1}" title="${escapeHTML(`${index + 1}. ${role}: ${messagePreview(message, index)}`)}"><i></i><span>${index + 1}</span></button>`;
     }).join("");
     $$('[data-jump-message]', els.messageMap).forEach((button) => button.addEventListener("click", () => {
@@ -1560,7 +1560,7 @@
   async function newSession(focus = true) {
     if (!state.currentDirectory) { openProjectDialog(); return null; }
     try {
-      const session = await api("/session", { method: "POST", body: { title: "New Digital Servant session" } });
+      const session = await api("/session", { method: "POST", body: { title: "New Seneschal session" } });
       state.sessions.unshift(session);
       state.currentSessionID = session.id;
       storage.set("atelier-session", session.id);
@@ -1727,7 +1727,7 @@
     if (!session) return;
     const payload = {
       exportedAt: new Date().toISOString(),
-      application: "Digital Servant",
+      application: "Seneschal",
       privacyNote: "Review before sharing: this export may contain prompts, model responses, tool activity, and file paths.",
       session,
       messages: state.messages
@@ -1808,7 +1808,7 @@
         renderPermissions();
       } else if (payload.type === "session.error") {
         let detail = properties.error?.data?.message || properties.error?.message || "The active model returned an error.";
-        if (/ProviderModelNotFoundError|Model not found:\s*opencode\/x-preview-f-free/i.test(detail)) detail = "Ox Alpha is not available in this OpenCode engine version. Run the Digital Servant updater, fully close the app, and reopen it.";
+        if (/ProviderModelNotFoundError|Model not found:\s*opencode\/x-preview-f-free/i.test(detail)) detail = "Ox Alpha is not available in this OpenCode engine version. Run the Seneschal updater, fully close the app, and reopen it.";
         const retryableOutage = properties.error?.data?.statusCode === 503 || /endpoint is unavailable|service unavailable/i.test(detail);
         if (retryableOutage && properties.sessionID === state.currentSessionID) {
           abortSession().catch(() => null);
@@ -1889,7 +1889,7 @@
 
   function stopConversationMode(showNotice = true) {
     state.conversationMode = false;
-    storage.set("digital-servant-talk-mode", false);
+    storage.set("seneschal-talk-mode", false);
     clearTimeout(state.conversationRestartTimer);
     state.conversationRecognition?.abort();
     state.conversationRecognition = null;
@@ -1969,7 +1969,7 @@
     if (state.speechRecognition) state.speechRecognition.abort();
     if (state.mediaRecorder) stopMediaRecording();
     state.conversationMode = true;
-    storage.set("digital-servant-talk-mode", true);
+    storage.set("seneschal-talk-mode", true);
     state.voiceAwaitingResponse = false;
     setTalkState("Listening");
     toast("Talk mode is on — speak naturally, My Lord. Click Talk to stop.");
@@ -2255,7 +2255,7 @@
     try {
       await workspace("/workspace/approval-policy", { method: "POST", body: { profile } });
       els.approvalDialog.close();
-      toast("Approval policy saved. Close and reopen Digital Servant to activate it.", "warn");
+      toast("Approval policy saved. Close and reopen Seneschal to activate it.", "warn");
     } catch (failure) { error.textContent = failure.message; error.hidden = false; }
     finally { button.disabled = false; button.textContent = "Save policy"; }
   }
@@ -2387,7 +2387,7 @@
     $("#providerConnectForm").addEventListener("submit", connectProvider);
     $("#providerCancelButton").addEventListener("click", () => els.providerDialog.close());
     $("#providerAdvancedButton").addEventListener("click", () => { els.providerDialog.close(); openClassic(); });
-    $("#settingsBudgetButton").addEventListener("click", () => openAdvancedSetting("Open provider billing dashboards to set hard limits; Digital Servant only estimates local usage."));
+    $("#settingsBudgetButton").addEventListener("click", () => openAdvancedSetting("Open provider billing dashboards to set hard limits; Seneschal only estimates local usage."));
     $("#settingsVoiceButton").addEventListener("click", toggleVoiceFromSettings);
     $("#settingsApprovalButton").addEventListener("click", openApprovalSettings);
     $("#settingsCommandsButton").addEventListener("click", () => { els.settingsDialog.close(); openCommands(); });
@@ -2430,7 +2430,7 @@
       if (innerWidth <= 680) { $(".sidebar").classList.toggle("open"); return; }
       state.currentSessionID = ""; state.messages = []; storage.set("atelier-session", ""); renderAll();
     });
-    els.model.addEventListener("change", () => { state.selectedModel = els.model.value; storage.set("atelier-model", state.selectedModel); renderModelCapability(); renderModelVariants(); renderUsage(); const model = selectedModel(); if (model?.providerID === "opencode" && model.id === "deepseek-v4-flash-free") toast("DeepSeek V4 Flash Free is currently returning provider outages. Digital Servant will stop repeated 503 retries.", "warn"); });
+    els.model.addEventListener("change", () => { state.selectedModel = els.model.value; storage.set("atelier-model", state.selectedModel); renderModelCapability(); renderModelVariants(); renderUsage(); const model = selectedModel(); if (model?.providerID === "opencode" && model.id === "deepseek-v4-flash-free") toast("DeepSeek V4 Flash Free is currently returning provider outages. Seneschal will stop repeated 503 retries.", "warn"); });
     els.modelVariant.addEventListener("change", () => { const model = selectedModel(); if (!model) return; state.selectedVariants[model.value] = els.modelVariant.value; storage.set("atelier-model-variants", state.selectedVariants); });
     els.agent.addEventListener("change", () => { state.selectedAgent = els.agent.value; storage.set("atelier-agent", state.selectedAgent); els.inspectorAgent.textContent = agentDisplayName(state.selectedAgent); renderInspector(); renderInstructionStack(); renderModelCapability(); if (state.selectedAgent === "chat") toast("Chat mode enabled. All tools and system actions are off."); });
     els.form.addEventListener("submit", (event) => { event.preventDefault(); sendPrompt(els.prompt.value); });
@@ -2509,7 +2509,7 @@
     setMotion(state.motion);
     syncPanelState();
     state.conversationMode = false;
-    storage.set("digital-servant-talk-mode", false);
+    storage.set("seneschal-talk-mode", false);
     setTalkState();
     syncMotionState();
     bindEvents();

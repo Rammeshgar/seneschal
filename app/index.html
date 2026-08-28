@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#05070b" />
-    <title>Digital Servant</title>
+    <title>Seneschal</title>
     <link rel="icon" type="image/svg+xml" href="/workspace/favicon.svg" />
     <link rel="icon" href="/workspace/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/workspace/favicon-32.png" />
@@ -20,7 +20,7 @@
       <header class="topbar">
         <button class="brand" id="homeButton" aria-label="Open workspace home">
           <img class="brand-mark" src="/workspace/favicon.svg" alt="" aria-hidden="true" />
-          <span class="brand-copy"><strong>Digital Servant</strong><small>Private AI Atelier</small></span>
+          <span class="brand-copy"><strong>Seneschal</strong><small>Your Private AI Atelier</small></span>
         </button>
 
         <div class="top-model">
@@ -56,7 +56,7 @@
             <span class="theme-track"><i class="sun">☼</i><i class="moon">◒</i><b></b></span>
             <span id="themeLabel">Night</span>
           </button>
-          <button class="avatar" id="settingsButton" aria-label="Digital Servant settings">DS</button>
+          <button class="avatar" id="settingsButton" aria-label="Seneschal settings">SE</button>
         </div>
       </header>
 
@@ -117,7 +117,7 @@
               <i class="node node-a"></i><i class="node node-b"></i><i class="node node-c"></i><i class="node node-d"></i>
               <b class="core-node"><em></em></b>
             </div>
-            <p class="eyebrow">YOUR PRIVATE DIGITAL SERVANT</p>
+            <p class="eyebrow">YOUR PRIVATE AI SENESCHAL</p>
             <h1><span id="welcomePeriod">Night Studio</span><br /><em>At your command, My Lord.</em></h1>
             <p class="welcome-copy">Choose a project and begin a conversation. Local tools follow your approval policy; selected context is sent only to the cloud model you choose.</p>
             <div class="quick-grid">
@@ -143,7 +143,7 @@
 
           <form class="composer" id="composerForm">
             <div class="composer-topline"><span id="composerProject">No project selected</span><span class="composer-top-actions"><span id="modelCapability">Text + tools</span><button type="button" id="composerMinimizeButton" aria-label="Minimize message input">Minimize</button><button type="button" id="composerSizeButton" aria-label="Maximize message input">Maximize</button></span></div>
-            <textarea id="promptInput" rows="1" placeholder="Describe the desired state, ask a question, or use / for commands…" aria-label="Message Digital Servant"></textarea>
+            <textarea id="promptInput" rows="1" placeholder="Describe the desired state, ask a question, or use / for commands…" aria-label="Message Seneschal"></textarea>
             <div class="attachment-strip" id="attachmentStrip" hidden></div>
             <div class="composer-footer">
               <div class="composer-tools">
@@ -237,7 +237,7 @@
 
     <dialog class="modal settings-modal" id="settingsDialog">
       <form method="dialog">
-        <div class="modal-kicker">DIGITAL SERVANT CONTROL</div>
+        <div class="modal-kicker">SENESCHAL CONTROL</div>
         <h2>Workspace settings</h2>
         <div class="settings-grid">
           <button class="setting-card interactive-setting" type="button" id="openInstructionsButton"><span>Instructions Studio</span><strong id="settingsInstructions">Ready</strong><small>Persona, rules, agent roles, and skills</small></button>
@@ -300,11 +300,11 @@
       <form method="dialog">
         <div class="chat-space-head">
           <span class="chat-space-emblem" aria-hidden="true"><i></i><i></i><i></i></span>
-          <div><span class="modal-kicker">COMPANION SPACE</span><h2>ChatGPT Chat</h2><p>Use your normal ChatGPT experience alongside Digital Servant, without mixing their limits or permissions.</p></div>
+          <div><span class="modal-kicker">COMPANION SPACE</span><h2>ChatGPT Chat</h2><p>Use your normal ChatGPT experience alongside Seneschal, without mixing their limits or permissions.</p></div>
         </div>
         <div class="chat-space-comparison">
           <article class="chat-space-card chat"><span>CHATGPT</span><strong>Conversation space</strong><small>General chat, creativity, images, and the features available on your ChatGPT account.</small><div><i></i>Uses normal ChatGPT chat allowance</div></article>
-          <article class="chat-space-card work"><span>DIGITAL SERVANT</span><strong>Agent workspace</strong><small>Projects, files, browser tasks, Blender, skills, and permission-controlled actions.</small><div><i></i>Uses agent / Codex allowance</div></article>
+          <article class="chat-space-card work"><span>SENESCHAL</span><strong>Agent workspace</strong><small>Projects, files, browser tasks, Blender, skills, and permission-controlled actions.</small><div><i></i>Uses agent / Codex allowance</div></article>
         </div>
         <p class="chat-space-trust"><strong>Why it opens separately:</strong> ChatGPT account sessions are not a reusable API. Opening the official ChatGPT surface protects your login and keeps the allowance distinction honest.</p>
         <div class="modal-actions"><button value="cancel" class="secondary-button">Not now</button><button type="button" id="launchChatGPTButton" class="primary-button">Open ChatGPT Chat <span aria-hidden="true">↗</span></button></div>
@@ -314,7 +314,7 @@
     <dialog class="instruction-studio" id="instructionDialog">
       <div class="studio-shell">
         <header class="studio-header">
-          <div><span class="modal-kicker">INSTRUCTION CONTROL</span><h2>Instructions Studio</h2><p>Edit what Digital Servant knows about you, this project, and each working mode.</p></div>
+          <div><span class="modal-kicker">INSTRUCTION CONTROL</span><h2>Instructions Studio</h2><p>Edit what Seneschal knows about you, this project, and each working mode.</p></div>
           <div class="studio-status"><span id="instructionSaveState"><i></i>All changes saved</span><button type="button" id="closeInstructionsButton" aria-label="Close Instructions Studio">×</button></div>
         </header>
         <aside class="studio-nav" aria-label="Instruction sections">
@@ -328,7 +328,7 @@
         </aside>
         <main class="studio-main">
           <section class="studio-panel active" data-instruction-panel="persona">
-            <div class="panel-heading"><div><span>GLOBAL IDENTITY</span><h3>Persona</h3><p>How Digital Servant identifies itself and addresses you in every project.</p></div><small id="personaCount">0 characters</small></div>
+            <div class="panel-heading"><div><span>GLOBAL IDENTITY</span><h3>Persona</h3><p>How Seneschal identifies itself and addresses you in every project.</p></div><small id="personaCount">0 characters</small></div>
             <label class="studio-editor-label" for="personaEditor">Persona instructions</label>
             <textarea class="studio-editor" id="personaEditor" spellcheck="true" placeholder="Describe the assistant's identity, tone, and preferred form of address."></textarea>
             <div class="editor-path"><span>Stored securely in OpenCode</span><code id="personaPath">Global persona</code></div>
@@ -367,7 +367,7 @@
               <aside><div class="skill-list-head"><span>Available skills</span><small id="skillListCount">0</small></div><div class="skill-list" id="skillList"><div class="studio-empty">No skills yet.</div></div></aside>
               <div class="skill-editor-pane">
                 <section class="skill-link-installer" id="skillLinkInstaller" hidden>
-                  <div><span>INSTALL FROM LINK</span><strong>Bring a trusted skill into Digital Servant</strong><small>Paste a GitHub repository, SKILL.md link, or skill folder. We inspect it first; nothing is installed until you approve it.</small></div>
+                  <div><span>INSTALL FROM LINK</span><strong>Bring a trusted skill into Seneschal</strong><small>Paste a GitHub repository, SKILL.md link, or skill folder. We inspect it first; nothing is installed until you approve it.</small></div>
                   <label class="skill-link-input" for="skillLinkInput"><input id="skillLinkInput" type="url" inputmode="url" autocomplete="off" placeholder="https://github.com/owner/skill-repository" /><button type="button" id="inspectSkillLinkButton">Inspect</button></label>
                   <div class="skill-link-result" id="skillLinkResult" hidden></div>
                 </section>

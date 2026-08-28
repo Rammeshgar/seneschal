@@ -1,8 +1,8 @@
 {
-  "name": "digital-servant",
-  "version": "0.1.0-beta.1",
+  "name": "seneschal-ai",
+  "version": "0.2.0-beta.1",
   "private": true,
-  "description": "A local-first OpenCode desktop workspace for Windows and WSL.",
+  "description": "Seneschal is a private, local-first OpenCode workspace for Windows and WSL.",
   "license": "MIT",
   "engines": {
     "node": ">=20"

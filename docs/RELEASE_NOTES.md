@@ -1,6 +1,6 @@
-# Digital Servant v0.1.0 beta
+# Seneschal v0.2.0 beta
 
-The first public beta packages the custom OpenCode workspace as a portable Windows/WSL installation.
+Seneschal is the renamed public beta of the custom OpenCode workspace for Windows and WSL.
 
 It includes Plan, Build, and Chat roles; approval controls; model and thinking selectors; instruction and skill editing; attachments; voice input; session navigation; and optional browser and Blender status surfaces.
 

@@ -1,8 +1,8 @@
-# Digital Servant
+# Seneschal
 
-A local-first desktop workspace for OpenCode on Windows and WSL.
+**Your private AI atelier.**
 
-Digital Servant gives OpenCode a focused, personal interface: model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, attachments, voice input, optional browser and Blender status, and a matte day/night visual system.
+Seneschal gives OpenCode a focused, personal interface on Windows and WSL: model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, attachments, voice input, optional browser and Blender status, and a matte day/night visual system.
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
 
@@ -24,16 +24,16 @@ It is not an AI model, a provider subscription, or a way around provider usage l
 - OpenCode installed and working inside that WSL distribution
 - At least one model provider connected through OpenCode
 
-Brave is preferred when installed. Otherwise, Digital Servant opens in the Windows default browser. Blender and browser automation are optional and require their own local integrations.
+Brave is preferred when installed. Otherwise, Seneschal opens in the Windows default browser. Blender and browser automation are optional and require their own local integrations.
 
 ## Install
 
-1. Download the latest beta ZIP from [Releases](https://github.com/Rammeshgar/digital-servant/releases).
+1. Download the latest beta ZIP from [Releases](https://github.com/Rammeshgar/seneschal/releases).
 2. Extract it to a normal folder.
 3. Double-click `install.cmd`.
-4. Open **Digital Servant** from the desktop shortcut.
+4. Open **Seneschal** from the desktop shortcut.
 
-The installer copies the app to `%LOCALAPPDATA%\DigitalServant`, detects the WSL home folder, creates a local desktop shortcut, and preserves any existing OpenCode configuration. If your distribution is not named Ubuntu, run:
+The installer copies the app to `%LOCALAPPDATA%\Seneschal`, detects the WSL home folder, creates a local desktop shortcut, and preserves any existing OpenCode configuration. If your distribution is not named Ubuntu, run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -WslDistribution "YourDistroName"
@@ -62,7 +62,7 @@ The interface can show and use browser or Blender tools only when those tools ar
 
 ## Settings
 
-Machine-specific values are stored locally in `%LOCALAPPDATA%\DigitalServant\data\settings.json`:
+Machine-specific values are stored locally in `%LOCALAPPDATA%\Seneschal\data\settings.json`:
 
 ```json
 {
@@ -95,4 +95,12 @@ The server intentionally has no npm runtime dependencies.
 
 ## License
 
-Digital Servant is MIT licensed. OpenCode's license is included separately in `docs/OPENCODE-LICENSE.txt`.
+Seneschal is MIT licensed. OpenCode's license is included separately in `docs/OPENCODE-LICENSE.txt`.
+
+## Images and screenshots
+
+- Put README screenshots and demos in `docs/images/`.
+- Put reusable logos, social banners, and source artwork in `assets/`.
+- Put images that must appear inside the running interface in `app/assets/`; reference them as `/workspace/assets/filename.webp`.
+
+Prefer WebP or AVIF for large interface backgrounds, PNG for screenshots, and SVG for logos. Do not place personal screenshots, API keys, browser profiles, or private session content in the public repository.

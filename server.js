@@ -21,16 +21,16 @@ fs.mkdirSync(dataDirectory, { recursive: true });
 const settingsFile = path.join(dataDirectory, "settings.json");
 let localSettings = {};
 try { localSettings = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch { localSettings = {}; }
-const wslDistribution = process.env.DIGITAL_SERVANT_WSL_DISTRO || localSettings.wslDistribution || "Ubuntu";
+const wslDistribution = process.env.SENESCHAL_WSL_DISTRO || process.env.DIGITAL_SERVANT_WSL_DISTRO || localSettings.wslDistribution || "Ubuntu";
 const inferredLinuxUser = String(process.env.USERNAME || "user").toLowerCase();
-const wslLinuxHome = process.env.DIGITAL_SERVANT_WSL_HOME || localSettings.wslLinuxHome || `/home/${inferredLinuxUser}`;
-const launchDirectory = process.env.DIGITAL_SERVANT_PROJECTS || localSettings.launchDirectory || `${wslLinuxHome}/projects`;
+const wslLinuxHome = process.env.SENESCHAL_WSL_HOME || process.env.DIGITAL_SERVANT_WSL_HOME || localSettings.wslLinuxHome || `/home/${inferredLinuxUser}`;
+const launchDirectory = process.env.SENESCHAL_PROJECTS || process.env.DIGITAL_SERVANT_PROJECTS || localSettings.launchDirectory || `${wslLinuxHome}/projects`;
 const backupScript = path.join(installDirectory, "scripts", "backup-opencode.ps1");
 const blenderRoot = "C:\\Program Files\\Blender Foundation";
 const detectedBlender = fs.existsSync(blenderRoot)
   ? fs.readdirSync(blenderRoot).filter((name) => /^Blender \d/.test(name)).sort().reverse().map((name) => path.join(blenderRoot, name, "blender.exe")).find(fs.existsSync)
   : null;
-const blenderExecutable = process.env.DIGITAL_SERVANT_BLENDER || localSettings.blenderExecutable || detectedBlender || "";
+const blenderExecutable = process.env.SENESCHAL_BLENDER || process.env.DIGITAL_SERVANT_BLENDER || localSettings.blenderExecutable || detectedBlender || "";
 const wslHome = path.win32.join(`\\\\wsl.localhost\\${wslDistribution}`, ...wslLinuxHome.split("/").filter(Boolean));
 const openCodeConfigDirectory = path.win32.join(wslHome, ".config", "opencode");
 const openCodeConfigFile = path.win32.join(openCodeConfigDirectory, "opencode.json");
@@ -117,7 +117,7 @@ function authorizeFromQuery(request, response) {
 
 function rejectUnauthorized(response) {
   response.writeHead(401, { ...securityHeaders, "content-type": "text/html; charset=utf-8" });
-  response.end("<!doctype html><meta charset=utf-8><title>Digital Servant</title><style>body{font:16px system-ui;background:#171a18;color:#e8e7e0;display:grid;place-items:center;height:100vh;margin:0}main{max-width:34rem;padding:2rem;border:1px solid #3d4942;border-radius:18px;background:#202521}h1{font-size:1.25rem}p{color:#aab5ad;line-height:1.6}</style><main><h1>Digital Servant is locked</h1><p>Open it from the desktop icon so the local secure session can be restored.</p></main>");
+  response.end("<!doctype html><meta charset=utf-8><title>Seneschal</title><style>body{font:16px system-ui;background:#171a18;color:#e8e7e0;display:grid;place-items:center;height:100vh;margin:0}main{max-width:34rem;padding:2rem;border:1px solid #3d4942;border-radius:18px;background:#202521}h1{font-size:1.25rem}p{color:#aab5ad;line-height:1.6}</style><main><h1>Seneschal is locked</h1><p>Open it from the desktop icon so the local secure session can be restored.</p></main>");
 }
 
 function checkUpstream(callback) {
@@ -151,7 +151,7 @@ function startUpstream() {
 }
 
 function ensureOpenCodeModelCatalog() {
-  // OpenCode owns its live provider catalogue. Digital Servant reads that
+  // OpenCode owns its live provider catalogue. Seneschal reads that
   // catalogue through the local API and never rewrites model availability.
 }
 
@@ -168,13 +168,30 @@ function waitForUpstream(attempt = 0) {
 
 function serveStatic(request, response) {
   const pathname = new URL(request.url, `http://${request.headers.host || `${host}:${publicPort}`}`).pathname;
+  if (pathname.startsWith("/workspace/assets/")) {
+    let relative;
+    try { relative = decodeURIComponent(pathname.slice("/workspace/assets/".length)); }
+    catch { return false; }
+    const assetRoot = path.resolve(appDirectory, "assets");
+    const filename = path.resolve(assetRoot, relative);
+    if (!filename.startsWith(`${assetRoot}${path.sep}`)) return false;
+    const types = { ".avif": "image/avif", ".gif": "image/gif", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".svg": "image/svg+xml", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm" };
+    const contentType = types[path.extname(filename).toLowerCase()];
+    if (!contentType) return false;
+    fs.readFile(filename, (error, content) => {
+      if (error) return json(response, 404, { error: "Asset not found." });
+      response.writeHead(200, { ...securityHeaders, "content-type": contentType, "content-length": content.length });
+      response.end(content);
+    });
+    return true;
+  }
   const entry = staticFiles.get(pathname);
   if (!entry) return false;
   const [filename, contentType] = entry;
   fs.readFile(path.join(appDirectory, filename), (error, content) => {
     if (error) {
       response.writeHead(500, { ...securityHeaders, "content-type": "text/plain; charset=utf-8" });
-      response.end("The Digital Servant interface could not be loaded.");
+      response.end("The Seneschal interface could not be loaded.");
       return;
     }
     response.writeHead(200, { ...securityHeaders, "content-type": contentType, "content-length": content.length });
@@ -393,7 +410,7 @@ function skillLinkTarget(value) {
 function githubText(url, maximumBytes, accept, callback) {
   let settled = false;
   const finish = (error, value) => { if (!settled) { settled = true; callback(error, value); } };
-  const request = https.get(url, { headers: { "user-agent": "Digital-Servant-Skill-Installer/1.1", accept }, timeout: 10000 }, (response) => {
+  const request = https.get(url, { headers: { "user-agent": "Seneschal-Skill-Installer/1.1", accept }, timeout: 10000 }, (response) => {
     let bytes = 0;
     let content = "";
     if (response.statusCode !== 200) { response.resume(); finish(new Error(`GitHub returned ${response.statusCode || "an unknown error"} while inspecting this repository.`)); return; }
@@ -715,7 +732,7 @@ function startClassicProxy() {
 }
 
 function openWorkspace() {
-  console.log(`Digital Servant: http://${host}:${publicPort}/`);
+  console.log(`Seneschal: http://${host}:${publicPort}/`);
   scheduleWeeklyBackup();
   const url = `http://${host}:${publicPort}/?access=${workspaceToken}`;
   const braveCandidates = [

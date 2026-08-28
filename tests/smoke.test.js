@@ -33,7 +33,7 @@ test("release has no original machine paths or credentials", () => {
 test("machine settings and live providers are discovered instead of rewritten", () => {
   const server = read("server.js");
   assert.match(server, /settings\.json/);
-  assert.match(server, /DIGITAL_SERVANT_WSL_DISTRO/);
+  assert.match(server, /SENESCHAL_WSL_DISTRO/);
   assert.match(server, /never rewrites model availability/);
   assert.doesNotMatch(server, /delete config\.provider/);
 });
@@ -42,4 +42,10 @@ test("JSON attachments have a text normalization path", () => {
   const app = read("app/app.js");
   assert.match(app, /application\/json/);
   assert.match(app, /JSON\.parse/);
+});
+
+test("public-facing identity is Seneschal", () => {
+  const visible = ["app/index.html", "config/AGENTS.md", "README.md", "install.ps1"].map(read).join("\n");
+  assert.match(visible, /Seneschal/);
+  assert.doesNotMatch(visible, /Digital Servant/);
 });
