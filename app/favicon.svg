@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Digital Servant</title>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#101713" stroke="#33423a" stroke-width="4"/>
+
+  <!-- D: a deliberate, architectural entry point. -->
+  <path fill="#9db39f" fill-rule="evenodd" d="M20 20h17c12.7 0 23 10.3 23 23S49.7 66 37 66H20V20Zm12 12v22h5c6.1 0 11-4.9 11-11s-4.9-11-11-11h-5Z"/>
+
+  <!-- Servant signal: human presence above a precise branching system. -->
+  <path fill="#9db39f" d="M68 20h28c6.6 0 12 5.4 12 12v34H68V20Z"/>
+  <path fill="#101713" d="M74 44c9.6 1.4 17.4 8.3 20 17.4V66H82.1c-1.9-6.5-6.8-11.8-13.1-14.3V44.5c1.7-.4 3.3-.6 5-.5Z"/>
+  <path fill="#101713" d="M108 42.3v9.1C101.6 54 96.8 59.4 95 66H83.1c2.6-12 12.4-21.4 24.9-23.7Z"/>
+  <circle cx="88" cy="35" r="8" fill="#d8ae58"/>
+
+  <!-- Core: the private local workspace. -->
+  <path fill="#9db39f" fill-rule="evenodd" d="M20 74h40v34H32c-6.6 0-12-5.4-12-12V74Zm12 10v12h16V84H32Z"/>
+
+  <!-- S: a single confident service path, readable even at favicon size. -->
+  <path fill="#9db39f" d="M68 74h40v34H80c-6.6 0-12-5.4-12-12V74Z"/>
+  <path fill="none" stroke="#101713" stroke-width="11" stroke-linecap="round" d="M76 79c0 13 24 8 24 22"/>
+</svg>

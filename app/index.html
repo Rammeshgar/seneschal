@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en" data-theme="night" data-motion="orbit" data-motion-paused="false">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#05070b" />
+    <title>Digital Servant</title>
+    <link rel="icon" type="image/svg+xml" href="/workspace/favicon.svg" />
+    <link rel="icon" href="/workspace/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/workspace/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/workspace/icon-192.png" />
+    <link rel="stylesheet" href="/workspace/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <div class="app-shell" id="appShell">
+      <header class="topbar">
+        <button class="brand" id="homeButton" aria-label="Open workspace home">
+          <img class="brand-mark" src="/workspace/favicon.svg" alt="" aria-hidden="true" />
+          <span class="brand-copy"><strong>Digital Servant</strong><small>Private AI Atelier</small></span>
+        </button>
+
+        <div class="top-model">
+          <label class="select-wrap model-select-wrap" title="Active model">
+            <span class="provider-orb" id="providerOrb"></span>
+            <select id="modelSelect" aria-label="Active AI model"></select>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+          </label>
+          <span class="connection-pill" id="connectionPill"><i></i><span>Connecting</span></span>
+        </div>
+
+        <button class="command-search" id="commandButton" aria-label="Search workspace">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+          <span>Search sessions, models, actions…</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+
+        <div class="top-actions">
+          <button class="icon-button panel-toggle" id="leftPanelToggle" title="Minimize left panel" aria-label="Minimize left projects and sessions panel" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M6.5 9.5 4 12l2.5 2.5"/></svg>
+          </button>
+          <button class="icon-button panel-toggle" id="rightPanelToggle" title="Minimize right panel" aria-label="Minimize right agent context panel" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16m2.5-10.5L20 12l-2.5 2.5"/></svg>
+          </button>
+          <button class="icon-button" id="refreshButton" title="Refresh workspace" aria-label="Refresh workspace">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M18.1 15A7 7 0 1 1 17 6.1L20 9"/></svg>
+          </button>
+          <button class="motion-switch" id="motionSwitch" aria-label="Switch welcome animation" title="Switch welcome animation">
+            <span class="pixel-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <span id="motionLabel">Orbit</span>
+          </button>
+          <button class="theme-switch" id="themeSwitch" aria-label="Switch color theme" title="Switch day or night theme">
+            <span class="theme-track"><i class="sun">☼</i><i class="moon">◒</i><b></b></span>
+            <span id="themeLabel">Night</span>
+          </button>
+          <button class="avatar" id="settingsButton" aria-label="Digital Servant settings">DS</button>
+        </div>
+      </header>
+
+      <button class="exit-message-maximize" id="exitMessageMaximizeButton" type="button" aria-label="Exit maximized message view" title="Exit maximized view (Esc)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5"/><path d="m3 8 5-5m8 0 5 5M3 16l5 5m8 0 5-5"/></svg>
+        <span>Normal view</span><kbd>Esc</kbd>
+      </button>
+
+      <aside class="sidebar">
+        <button class="new-session primary-button" id="newSessionButton">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>New session</span>
+          <kbd>Ctrl N</kbd>
+        </button>
+
+        <div class="side-scroll">
+          <section class="rail-section">
+            <div class="rail-heading"><span>Projects</span><button id="addProjectButton" aria-label="Add project">+</button></div>
+            <div class="project-list" id="projectList"></div>
+          </section>
+
+          <section class="rail-section session-section">
+            <div class="rail-heading"><span>Sessions</span><small id="sessionCount">0</small></div>
+            <div class="session-list" id="sessionList"></div>
+          </section>
+        </div>
+
+        <div class="sidebar-footer">
+          <button class="rail-link" id="instructionsRailButton"><svg viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/></svg>Instructions</button>
+          <button class="rail-link chatgpt-rail-link" id="chatGPTRailButton"><span class="chatgpt-mini-mark" aria-hidden="true">C</span><span>ChatGPT Chat</span><small>CHAT</small></button>
+          <div class="usage-card">
+            <div><span>Context usage</span><strong id="usagePercent">0%</strong></div>
+            <div class="meter"><i id="usageMeter"></i></div>
+            <small id="usageDetail">Ready for a new session</small>
+          </div>
+          <button class="rail-link" id="settingsRailButton"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.08V21h-4v-.92a1.7 1.7 0 0 0-1.08-.68 1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.08-.04H3v-4h.92A1.7 1.7 0 0 0 4.6 8.88 1.7 1.7 0 0 0 4.26 7l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.08V3h4v.92A1.7 1.7 0 0 0 15.12 4.6 1.7 1.7 0 0 0 17 4.26l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.4.3.76.6 1l.08.04H21v4h-.92a1.7 1.7 0 0 0-.68 1.08Z"/></svg>Settings</button>
+          <button class="rail-link" id="classicButton"><svg viewBox="0 0 24 24"><path d="M14 5h5v5M10 14 19 5M19 14v5H5V5h5"/></svg>Classic OpenCode</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="conversation-panel">
+          <canvas class="pixel-city" id="pixelCity" width="160" height="96" aria-hidden="true"></canvas>
+          <div class="session-header" id="sessionHeader" hidden>
+            <div><span class="eyebrow" id="projectEyebrow">PROJECT</span><h1 id="sessionTitle">New session</h1></div>
+            <div class="session-actions">
+              <span class="status-chip" id="sessionStatus"><i></i><span>Idle</span></span>
+              <button class="icon-button" id="renameSessionButton" title="Rename session"><svg viewBox="0 0 24 24"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button>
+              <button class="icon-button" id="exportSessionButton" title="Export conversation" aria-label="Export conversation"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button>
+              <button class="icon-button" id="abortButton" title="Stop generation" disabled><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
+              <button class="icon-button danger-button" id="deleteSessionButton" title="Delete conversation" aria-label="Delete conversation"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>
+            </div>
+          </div>
+
+          <div class="welcome" id="welcomeView">
+            <div class="topology" aria-hidden="true">
+              <span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="orbit orbit-c"></span>
+              <i class="node node-a"></i><i class="node node-b"></i><i class="node node-c"></i><i class="node node-d"></i>
+              <b class="core-node"><em></em></b>
+            </div>
+            <p class="eyebrow">YOUR PRIVATE DIGITAL SERVANT</p>
+            <h1><span id="welcomePeriod">Night Studio</span><br /><em>At your command, My Lord.</em></h1>
+            <p class="welcome-copy">Choose a project and begin a conversation. Local tools follow your approval policy; selected context is sent only to the cloud model you choose.</p>
+            <div class="quick-grid">
+              <button class="quick-card clay" data-prompt="Inspect this project and explain its architecture, key files, and likely risks.">
+                <span class="quick-icon">⌁</span><strong>Analyze project</strong><small>Map structure and identify risks</small><i>01</i>
+              </button>
+              <button class="quick-card ochre" data-prompt="Summarize the most important documentation in this project and give me practical next steps.">
+                <span class="quick-icon">▤</span><strong>Summarize</strong><small>Distill docs and references</small><i>02</i>
+              </button>
+              <button class="quick-card cobalt" data-prompt="Review the current interface and propose a polished, accessible implementation plan.">
+                <span class="quick-icon">◇</span><strong>Design UI</strong><small>Craft accessible components</small><i>03</i>
+              </button>
+            </div>
+          </div>
+
+          <div class="message-scroll" id="messageScroll" hidden>
+            <div class="message-list" id="messageList"></div>
+            <nav class="message-map" id="messageMap" aria-label="Conversation steps" hidden></nav>
+            <button class="resume-follow" id="resumeFollowButton" type="button" hidden>Jump to latest</button>
+          </div>
+
+          <div class="permission-dock" id="permissionDock" hidden></div>
+
+          <form class="composer" id="composerForm">
+            <div class="composer-topline"><span id="composerProject">No project selected</span><span class="composer-top-actions"><span id="modelCapability">Text + tools</span><button type="button" id="composerMinimizeButton" aria-label="Minimize message input">Minimize</button><button type="button" id="composerSizeButton" aria-label="Maximize message input">Maximize</button></span></div>
+            <textarea id="promptInput" rows="1" placeholder="Describe the desired state, ask a question, or use / for commands…" aria-label="Message Digital Servant"></textarea>
+            <div class="attachment-strip" id="attachmentStrip" hidden></div>
+            <div class="composer-footer">
+              <div class="composer-tools">
+                <button class="skills-compose-button" id="skillsButton" type="button" title="Choose instructions and skills" aria-label="Open Instructions Studio"><svg viewBox="0 0 24 24"><path d="M7 3h10v5H7zM4 12h7v8H4zM14 12h6v8h-6z"/></svg><span>Skills</span><b id="activeSkillCount">0</b></button>
+                <label class="attach-button" title="Attach files">
+                  <input id="fileInput" type="file" multiple hidden />
+                  <svg viewBox="0 0 24 24"><path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5L13 2a4 4 0 0 1 5.7 5.7l-9.9 9.9a2 2 0 1 1-2.8-2.8l9.2-9.2"/></svg>
+                </label>
+                <button class="mic-button" id="micButton" type="button" title="Dictate or record a voice message" aria-label="Start voice dictation or recording" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/></svg><span>Mic</span></button>
+                <button class="talk-button" id="talkButton" type="button" title="Start turn-by-turn voice conversation" aria-label="Start Talk mode" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 12h2m2-4v8m3-11v14m3-11v8m3-6v4m3-3v2"/></svg><span>Talk</span><i aria-hidden="true"></i></button>
+                <button class="browser-compose-button" id="browserButton" type="button" title="Give the agent a browser task" aria-label="Open agent browser controls"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></svg><span>Browser</span></button>
+                <label class="select-wrap agent-select-wrap model-variant-wrap" id="modelVariantWrap" hidden><span>Thinking</span><select id="modelVariantSelect" aria-label="Model thinking level"></select></label>
+                <label class="select-wrap agent-select-wrap"><span>Agent</span><select id="agentSelect" aria-label="Agent mode"></select></label>
+              </div>
+              <div class="send-group">
+                <span class="send-hint">Enter to send · Shift Enter for line</span>
+                <button class="stop-button" id="composerStopButton" type="button" hidden><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg><span>Stop</span></button>
+                <button class="send-button" id="sendButton" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <aside class="inspector" id="inspector">
+          <section class="inspector-head">
+            <div><span class="eyebrow">AGENT CONTEXT</span><strong id="inspectorAgent">Build</strong></div>
+            <button class="icon-button mobile-inspector-close" id="closeInspectorButton" aria-label="Close inspector">×</button>
+          </section>
+
+          <section class="inspector-block">
+            <div class="block-title"><span>Permissions</span><button type="button" class="inline-settings-button" id="openApprovalButton">Manage</button></div>
+            <div class="policy-list" id="policyList"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+          </section>
+
+          <section class="inspector-block">
+            <div class="block-title"><span>Active tools</span><small id="toolCount">—</small></div>
+            <div class="tool-grid" id="toolGrid"></div>
+          </section>
+
+          <section class="inspector-block browser-block">
+            <div class="block-title"><span>Agent browser</span><small id="browserState">CHECKING</small></div>
+            <div class="browser-card" id="browserCard">
+              <div class="browser-card-top"><span class="browser-glyph"><i></i><i></i><i></i></span><div><strong>Playwright Brave</strong><small id="browserDetail">Checking the isolated Brave bridge</small></div></div>
+              <button type="button" id="browserTryButton"><span>New browser task</span><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            </div>
+          </section>
+
+          <section class="inspector-block integrations-block">
+            <div class="block-title"><span>Creative bridge</span><small id="blenderState">CHECKING</small></div>
+            <div class="integration-card" id="blenderCard">
+              <span class="integration-mark">B</span>
+              <div><strong>Blender 5.1</strong><small id="blenderDetail">Checking the local bridge</small></div>
+              <button type="button" id="openBlenderButton">Open</button>
+            </div>
+          </section>
+
+          <section class="inspector-block budget-block">
+            <div class="block-title"><span>Paid API guard</span><small id="budgetState">$10 TARGET</small></div>
+            <div class="budget-meter"><i id="budgetMeter"></i></div>
+            <div class="budget-copy"><strong id="budgetAmount">Checking…</strong><small>Last 30 days · estimate</small></div>
+          </section>
+
+          <section class="inspector-block provider-block">
+            <div class="block-title"><span>Providers</span><small id="providerCount">—</small></div>
+            <div class="provider-list" id="providerList"></div>
+          </section>
+
+          <section class="inspector-block latency-block">
+            <div class="block-title"><span>Workspace pulse</span><small id="pulseLabel">STANDBY</small></div>
+            <div class="pulse-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="pulse-meta"><span>Events <strong id="eventCount">0</strong></span><span>Version <strong id="versionText">—</strong></span></div>
+          </section>
+
+          <button class="protocol-button" id="protocolButton"><span><i></i>Inspect protocol log</span><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+        </aside>
+      </main>
+    </div>
+
+    <button class="mobile-inspector-button" id="openInspectorButton" aria-label="Open agent context"><span></span>Context</button>
+
+    <dialog class="modal" id="projectDialog">
+      <form method="dialog" id="projectForm">
+        <div class="modal-kicker">NEW WORKSPACE</div>
+        <h2>Add a project</h2>
+        <p>Enter a Windows or WSL folder path. OpenCode will work inside that project and keep permissions scoped to it.</p>
+        <label>Project folder<input id="projectPathInput" autocomplete="off" placeholder="C:\Users\YourName\Documents\My Project" /></label>
+        <div class="modal-error" id="projectError" hidden></div>
+        <div class="modal-actions"><button value="cancel" class="secondary-button">Cancel</button><button id="confirmProjectButton" value="default" class="primary-button">Add project</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal settings-modal" id="settingsDialog">
+      <form method="dialog">
+        <div class="modal-kicker">DIGITAL SERVANT CONTROL</div>
+        <h2>Workspace settings</h2>
+        <div class="settings-grid">
+          <button class="setting-card interactive-setting" type="button" id="openInstructionsButton"><span>Instructions Studio</span><strong id="settingsInstructions">Ready</strong><small>Persona, rules, agent roles, and skills</small></button>
+          <button class="setting-card interactive-setting chatgpt-setting" type="button" id="settingsChatGPTButton"><span>ChatGPT companion</span><strong>Normal Chat</strong><small>Separate ChatGPT allowance · opens securely</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsEngineButton"><span>Engine</span><strong id="settingsEngine">OpenCode</strong><small>Open the complete OpenCode controls</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsThemeButton"><span>Theme</span><strong id="settingsTheme">Night Studio</strong><small>Switch between the day and night palettes</small></button>
+          <button class="setting-card interactive-setting motion-setting" type="button" id="settingsMotionButton"><span>Workspace atmosphere</span><strong id="settingsMotion">Orbit Drift</strong><small>Cycle motion environments or choose still mode</small></button>
+          <button class="setting-card interactive-setting provider-setting" type="button" id="settingsProvidersButton"><span>Providers</span><strong id="settingsProviders">—</strong><small>Connect Zen, Gemini, DeepSeek, and other model providers</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsBrowserButton"><span>Agent browser</span><strong id="settingsBrowser">Checking</strong><small>Open a browser task</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsBlenderButton"><span>Blender MCP</span><strong id="settingsBlender">Checking</strong><small>Open Blender with the local bridge</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsDeepSeekButton"><span>DeepSeek V4</span><strong id="settingsDeepSeek">Ready for key</strong><small>Connect or manage the provider key</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsBudgetButton"><span>Paid API target</span><strong id="settingsBudget">$10 / month</strong><small>Review providers and set provider-side limits</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsVoiceButton"><span>Conversation voice</span><strong id="settingsVoice">Turn-by-turn · Ready</strong><small>Start or stop spoken conversation mode</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsApprovalButton"><span>Approval policy</span><strong>Ask before action</strong><small>Review Plan and Build permissions</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsBackupsButton"><span>Private backups</span><strong>Weekly</strong><small>Create a sanitized backup now</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsCommandsButton"><span>Commands</span><strong id="settingsCommands">Loading…</strong><small>Browse OpenCode commands, skills, and session references</small></button>
+        </div>
+        <p class="settings-note"><strong>Privacy, honestly:</strong> this interface runs locally, but your selected cloud model receives prompts and any file, browser, or Blender context needed for the task. Provider sign-in and API keys stay in OpenCode.</p>
+        <div class="modal-actions"><button type="button" id="backupNowButton" class="secondary-button">Back up now</button><button value="cancel" class="secondary-button">Close</button><button type="button" id="settingsClassicButton" class="primary-button">Open advanced settings</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal provider-modal" id="providerDialog">
+      <form id="providerConnectForm">
+        <div class="modal-kicker">MODEL CONNECTIONS</div>
+        <h2>Providers</h2>
+        <p>Connect a provider directly. Your key is sent only to the local OpenCode engine and is never saved by this page.</p>
+        <label>Provider
+          <select id="providerConnectSelect">
+            <option value="opencode">OpenCode Zen</option>
+            <option value="google">Google Gemini</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI API</option>
+          </select>
+        </label>
+        <label>API key<input id="providerKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the provider API key" /></label>
+        <div class="provider-connection-status" id="providerConnectionStatus"></div>
+        <div class="modal-error" id="providerConnectError" hidden></div>
+        <div class="modal-actions"><button type="button" id="providerAdvancedButton" class="secondary-button">More providers</button><button type="button" id="providerCancelButton" class="secondary-button">Cancel</button><button type="submit" id="providerConnectButton" class="primary-button">Connect</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal approval-modal" id="approvalDialog">
+      <form id="approvalPolicyForm">
+        <div class="modal-kicker">PERMISSION CONTROL</div>
+        <h2>Ask for approval</h2>
+        <p>Choose how much freedom Build mode receives. Plan mode always remains read-only.</p>
+        <div class="approval-options">
+          <label><input type="radio" name="approvalProfile" value="recommended" checked /><span><strong>Recommended</strong><small>Safe reads run automatically; edits, commands, browser, Blender, and external actions ask first.</small></span><em>DEFAULT</em></label>
+          <label><input type="radio" name="approvalProfile" value="strict" /><span><strong>Always ask</strong><small>Also asks before reading files. Safest, but produces many interruptions.</small></span></label>
+          <label><input type="radio" name="approvalProfile" value="trusted" /><span><strong>Trusted project</strong><small>Build may edit files and run commands without asking. External, browser, and Blender actions still ask.</small></span></label>
+        </div>
+        <div class="approval-warning">“Allow once”, “Always”, and “Reject” still appear whenever an individual approval is requested.</div>
+        <div class="modal-error" id="approvalPolicyError" hidden></div>
+        <div class="modal-actions"><button type="button" id="approvalCancelButton" class="secondary-button">Cancel</button><button type="submit" id="approvalSaveButton" class="primary-button">Save policy</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal chat-space-modal" id="chatGPTDialog">
+      <form method="dialog">
+        <div class="chat-space-head">
+          <span class="chat-space-emblem" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div><span class="modal-kicker">COMPANION SPACE</span><h2>ChatGPT Chat</h2><p>Use your normal ChatGPT experience alongside Digital Servant, without mixing their limits or permissions.</p></div>
+        </div>
+        <div class="chat-space-comparison">
+          <article class="chat-space-card chat"><span>CHATGPT</span><strong>Conversation space</strong><small>General chat, creativity, images, and the features available on your ChatGPT account.</small><div><i></i>Uses normal ChatGPT chat allowance</div></article>
+          <article class="chat-space-card work"><span>DIGITAL SERVANT</span><strong>Agent workspace</strong><small>Projects, files, browser tasks, Blender, skills, and permission-controlled actions.</small><div><i></i>Uses agent / Codex allowance</div></article>
+        </div>
+        <p class="chat-space-trust"><strong>Why it opens separately:</strong> ChatGPT account sessions are not a reusable API. Opening the official ChatGPT surface protects your login and keeps the allowance distinction honest.</p>
+        <div class="modal-actions"><button value="cancel" class="secondary-button">Not now</button><button type="button" id="launchChatGPTButton" class="primary-button">Open ChatGPT Chat <span aria-hidden="true">↗</span></button></div>
+      </form>
+    </dialog>
+
+    <dialog class="instruction-studio" id="instructionDialog">
+      <div class="studio-shell">
+        <header class="studio-header">
+          <div><span class="modal-kicker">INSTRUCTION CONTROL</span><h2>Instructions Studio</h2><p>Edit what Digital Servant knows about you, this project, and each working mode.</p></div>
+          <div class="studio-status"><span id="instructionSaveState"><i></i>All changes saved</span><button type="button" id="closeInstructionsButton" aria-label="Close Instructions Studio">×</button></div>
+        </header>
+        <aside class="studio-nav" aria-label="Instruction sections">
+          <button type="button" class="active" data-instruction-tab="persona"><span>P</span><div><strong>Persona</strong><small>Identity and address</small></div></button>
+          <button type="button" data-instruction-tab="general"><span>G</span><div><strong>General</strong><small>Rules for everything</small></div></button>
+          <button type="button" data-instruction-tab="project"><span>PR</span><div><strong>Project</strong><small>Current workspace only</small></div></button>
+          <button type="button" data-instruction-tab="agents"><span>A</span><div><strong>Agent roles</strong><small>Build and Plan</small></div></button>
+          <button type="button" data-instruction-tab="skills"><span>S</span><div><strong>Skills</strong><small>Reusable expertise</small></div></button>
+          <button type="button" data-instruction-tab="preview"><span>◫</span><div><strong>Active stack</strong><small>What applies next</small></div></button>
+          <div class="studio-nav-note"><i></i><span>Changes stay local and are backed up before every save.</span></div>
+        </aside>
+        <main class="studio-main">
+          <section class="studio-panel active" data-instruction-panel="persona">
+            <div class="panel-heading"><div><span>GLOBAL IDENTITY</span><h3>Persona</h3><p>How Digital Servant identifies itself and addresses you in every project.</p></div><small id="personaCount">0 characters</small></div>
+            <label class="studio-editor-label" for="personaEditor">Persona instructions</label>
+            <textarea class="studio-editor" id="personaEditor" spellcheck="true" placeholder="Describe the assistant's identity, tone, and preferred form of address."></textarea>
+            <div class="editor-path"><span>Stored securely in OpenCode</span><code id="personaPath">Global persona</code></div>
+            <div class="studio-actions"><button type="button" class="ghost-button" data-default-instruction="persona">Restore recommended</button><button type="button" class="secondary-button" data-undo-instruction="persona">Undo last save</button><button type="button" class="primary-button" data-save-instruction="persona">Save persona</button></div>
+          </section>
+
+          <section class="studio-panel" data-instruction-panel="general">
+            <div class="panel-heading"><div><span>GLOBAL BEHAVIOR</span><h3>General instructions</h3><p>Rules that apply to every conversation, model, and project.</p></div><small id="generalCount">0 characters</small></div>
+            <label class="studio-editor-label" for="generalEditor">General instructions</label>
+            <textarea class="studio-editor" id="generalEditor" spellcheck="true" placeholder="Add permanent preferences, safety rules, and communication style."></textarea>
+            <div class="editor-path"><span>Combined automatically with the persona</span><code id="generalPath">Global rules</code></div>
+            <div class="studio-actions"><button type="button" class="ghost-button" data-default-instruction="general">Restore recommended</button><button type="button" class="secondary-button" data-undo-instruction="general">Undo last save</button><button type="button" class="primary-button" data-save-instruction="general">Save general rules</button></div>
+          </section>
+
+          <section class="studio-panel" data-instruction-panel="project">
+            <div class="panel-heading"><div><span>CURRENT WORKSPACE</span><h3>Project instructions</h3><p>Architecture, goals, conventions, and boundaries for only the selected project.</p></div><small id="projectCount">0 characters</small></div>
+            <div class="project-instruction-status" id="projectInstructionStatus"><i></i><span>Select a project to edit its instructions.</span></div>
+            <label class="studio-editor-label" for="projectEditor">Project instructions</label>
+            <textarea class="studio-editor" id="projectEditor" spellcheck="true" placeholder="Describe this project's purpose, structure, standards, tests, and forbidden changes."></textarea>
+            <div class="editor-path"><span>Travels with the project</span><code id="projectInstructionPath">No project selected</code></div>
+            <div class="studio-actions"><button type="button" class="ghost-button" data-default-instruction="project">Start with a template</button><button type="button" class="secondary-button" data-undo-instruction="project">Undo last save</button><button type="button" class="primary-button" data-save-instruction="project">Save project rules</button></div>
+          </section>
+
+          <section class="studio-panel" data-instruction-panel="agents">
+            <div class="panel-heading"><div><span>WORKING MODES</span><h3>Agent-role instructions</h3><p>Extra system guidance applied privately when you choose Build or Plan.</p></div><small>Permissions remain protected</small></div>
+            <div class="agent-editor-grid">
+              <article><header><span class="agent-role-mark build">B</span><div><strong>Build</strong><small>Implementation and verification</small></div></header><textarea class="studio-editor compact" id="buildAgentEditor" spellcheck="true"></textarea><footer><button type="button" class="secondary-button" data-undo-instruction="agent-build">Undo</button><button type="button" class="primary-button" data-save-instruction="agent-build">Save Build</button></footer></article>
+              <article><header><span class="agent-role-mark plan">P</span><div><strong>Plan</strong><small>Read-only analysis and strategy</small></div></header><textarea class="studio-editor compact" id="planAgentEditor" spellcheck="true"></textarea><footer><button type="button" class="secondary-button" data-undo-instruction="agent-plan">Undo</button><button type="button" class="primary-button" data-save-instruction="agent-plan">Save Plan</button></footer></article>
+            </div>
+            <p class="studio-footnote">These notes cannot grant tools or bypass permissions. The permission inspector remains authoritative.</p>
+          </section>
+
+          <section class="studio-panel" data-instruction-panel="skills">
+            <div class="panel-heading"><div><span>REUSABLE EXPERTISE</span><h3>Skills</h3><p>Create expertise once, then activate one or several skills for upcoming requests.</p></div><div class="panel-heading-actions"><button type="button" class="secondary-button" id="installSkillLinkButton">Install from link</button><button type="button" class="secondary-button" id="newSkillButton">+ New skill</button></div></div>
+            <div class="skill-workbench">
+              <aside><div class="skill-list-head"><span>Available skills</span><small id="skillListCount">0</small></div><div class="skill-list" id="skillList"><div class="studio-empty">No skills yet.</div></div></aside>
+              <div class="skill-editor-pane">
+                <section class="skill-link-installer" id="skillLinkInstaller" hidden>
+                  <div><span>INSTALL FROM LINK</span><strong>Bring a trusted skill into Digital Servant</strong><small>Paste a GitHub repository, SKILL.md link, or skill folder. We inspect it first; nothing is installed until you approve it.</small></div>
+                  <label class="skill-link-input" for="skillLinkInput"><input id="skillLinkInput" type="url" inputmode="url" autocomplete="off" placeholder="https://github.com/owner/skill-repository" /><button type="button" id="inspectSkillLinkButton">Inspect</button></label>
+                  <div class="skill-link-result" id="skillLinkResult" hidden></div>
+                </section>
+                <div class="skill-fields"><label>Skill ID<input id="skillNameInput" placeholder="cinematic-lighting" maxlength="64" /></label><label>Scope<select id="skillScopeSelect"><option value="global">Every project</option><option value="project">Current project</option></select></label></div>
+                <label class="studio-editor-label" for="skillEditor">Skill instructions</label>
+                <textarea class="studio-editor skill-code" id="skillEditor" spellcheck="false" placeholder="---&#10;name: Cinematic Lighting&#10;description: Creates professional cinematic lighting for Blender scenes.&#10;---&#10;&#10;# Workflow&#10;..."></textarea>
+                <div class="skill-selection-note"><i></i><span>Checked skills are requested automatically. The model loads their full instructions only when needed.</span></div>
+                <div class="studio-actions"><button type="button" class="danger-text-button" id="archiveSkillButton" disabled>Archive skill</button><button type="button" class="primary-button" id="saveSkillButton">Save skill</button></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="studio-panel" data-instruction-panel="preview">
+            <div class="panel-heading"><div><span>EFFECTIVE CONTEXT</span><h3>Active instruction stack</h3><p>A readable preview of what influences the next request.</p></div><small id="instructionBackupCount">0 backups</small></div>
+            <div class="instruction-stack" id="instructionStack"></div>
+          </section>
+          <div class="studio-error" id="instructionError" hidden></div>
+        </main>
+      </div>
+    </dialog>
+
+    <dialog class="modal danger-modal" id="deleteSessionDialog">
+      <form method="dialog" id="deleteSessionForm">
+        <div class="modal-kicker">DELETE CONVERSATION</div>
+        <h2>Delete this conversation?</h2>
+        <p><strong id="deleteSessionTitle">This conversation</strong> and its message history will be permanently removed. Project files created by the agent will not be deleted.</p>
+        <div class="modal-actions"><button value="cancel" class="secondary-button">Keep conversation</button><button value="default" class="danger-action" id="confirmDeleteSessionButton">Delete permanently</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal message-edit-modal" id="messageEditDialog">
+      <form id="messageEditForm">
+        <div class="modal-kicker">EDIT MESSAGE</div>
+        <h2>Revise and retry</h2>
+        <p>This returns the conversation to this message, removes later responses from the active branch, and runs your corrected request.</p>
+        <label for="messageEditInput">Your message<textarea id="messageEditInput" rows="8" spellcheck="true"></textarea></label>
+        <div class="message-edit-note" id="messageEditAttachmentNote" hidden></div>
+        <div class="modal-actions"><button type="button" class="secondary-button" id="cancelMessageEditButton">Cancel</button><button type="submit" class="primary-button">Save and retry</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal browser-modal" id="browserDialog">
+      <form method="dialog" id="browserForm">
+        <div class="modal-kicker">AGENT BROWSER</div>
+        <h2>Inspect a page</h2>
+        <p>The agent can navigate, click, type, inspect page structure, and take screenshots. Browser actions still follow your approval policy.</p>
+        <label>Website address<input id="browserUrlInput" type="url" autocomplete="url" spellcheck="false" placeholder="https://example.com" /></label>
+        <label>What should it do?<textarea id="browserTaskInput" rows="4">Inspect the page, test the main interactions, and report any visible problems. Take a screenshot if it helps.</textarea></label>
+        <div class="modal-error" id="browserError" hidden></div>
+        <div class="browser-privacy"><i></i><span>Isolated session</span><small>No saved browser profile</small></div>
+        <div class="modal-actions"><button value="cancel" class="secondary-button">Cancel</button><button value="default" id="runBrowserButton" class="primary-button">Run browser task</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="command-modal" id="commandDialog">
+      <div class="command-box">
+        <div class="command-input-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="commandInput" placeholder="Search sessions, models, or actions…" autocomplete="off"/><kbd>Esc</kbd></div>
+        <div class="command-results" id="commandResults"></div>
+        <div class="command-footer"><span>↑↓ Navigate</span><span>Enter Select</span></div>
+      </div>
+    </dialog>
+
+    <dialog class="protocol-modal" id="protocolDialog">
+      <div class="protocol-sheet">
+        <header><div><span class="eyebrow">LIVE CONNECTION</span><h2>Protocol log</h2></div><button id="closeProtocolButton" class="icon-button">×</button></header>
+        <div class="protocol-log" id="protocolLog"></div>
+      </div>
+    </dialog>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+    <script src="/workspace/app.js" defer></script>
+  </body>
+</html>

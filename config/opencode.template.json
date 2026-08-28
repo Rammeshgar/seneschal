@@ -1,0 +1,31 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "autoupdate": "notify",
+  "instructions": ["GENERAL.md"],
+  "permission": {
+    "read": "allow",
+    "edit": "ask",
+    "bash": "ask",
+    "task": "ask",
+    "external_directory": "ask",
+    "webfetch": "ask",
+    "websearch": "ask"
+  },
+  "agent": {
+    "plan": {
+      "description": "Read-only planning and analysis",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "build": {
+      "description": "Implementation with approval before changes",
+      "permission": {
+        "edit": "ask",
+        "bash": "ask"
+      }
+    }
+  }
+}

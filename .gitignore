@@ -1,0 +1,13 @@
+data/
+node_modules/
+artifacts/
+browser-runtime/
+dist/
+*.log
+*.backup
+*.before-*
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
