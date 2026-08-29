@@ -4,6 +4,7 @@ const http = require("http");
 const https = require("https");
 const net = require("net");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
@@ -97,6 +98,15 @@ function processIsRunning(processId) {
   try { process.kill(processId, 0); return true; } catch { return false; }
 }
 
+function lockPredatesCurrentBoot() {
+  try {
+    const bootTime = Date.now() - (os.uptime() * 1000);
+    return fs.statSync(instanceLockFile).mtimeMs < bootTime - 5000;
+  } catch {
+    return false;
+  }
+}
+
 function acquireInstanceLock() {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -107,6 +117,10 @@ function acquireInstanceLock() {
       return true;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
+      if (lockPredatesCurrentBoot()) {
+        try { fs.unlinkSync(instanceLockFile); } catch {}
+        continue;
+      }
       let existingProcessId = 0;
       try { existingProcessId = Number.parseInt(fs.readFileSync(instanceLockFile, "utf8").trim(), 10); } catch {}
       if (processIsRunning(existingProcessId)) return false;
@@ -123,10 +137,11 @@ function releaseInstanceLock() {
 }
 
 if (!acquireInstanceLock()) {
-  console.log("Seneschal is already starting or running.");
-  process.exit(0);
+  console.log("Seneschal is already starting or running; opening the workspace.");
+  openRunningWorkspace();
+} else {
+  process.on("exit", releaseInstanceLock);
 }
-process.on("exit", releaseInstanceLock);
 
 function parseCookies(request) {
   return Object.fromEntries(String(request.headers.cookie || "").split(";").map((part) => part.trim().split("=")).filter((pair) => pair.length === 2));
@@ -584,6 +599,33 @@ function usageEstimate(callback) {
   });
 }
 
+function browserRuntimeInfo() {
+  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  const launchers = [
+    path.join(installDirectory, "browser-runtime", "start-playwright-mcp.cmd"),
+    path.join(localAppData, "Seneschal", "browser-runtime", "start-playwright-mcp.cmd"),
+    path.join(localAppData, "OpenCodeAtelier", "browser-runtime", "start-playwright-mcp.cmd")
+  ];
+  const launcher = launchers.find((candidate) => fs.existsSync(candidate) && fs.existsSync(path.join(path.dirname(candidate), "node_modules", ".bin", "playwright-mcp.cmd"))) || "";
+  const runtimeRoot = launcher ? path.dirname(path.dirname(launcher)) : installDirectory;
+  const flag = path.join(runtimeRoot, "data", "playwright-visible.flag");
+  return { available: Boolean(launcher), visible: fs.existsSync(flag), launcher, flag };
+}
+
+function restartPlaywrightBridge(launcher, callback) {
+  const literal = String(launcher).replace(/'/g, "''");
+  const script = [
+    `$target = '${literal}'`,
+    "$matches = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($target, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 })",
+    "foreach ($item in $matches) { & taskkill.exe /PID $item.ProcessId /T /F | Out-Null }",
+    "[Console]::Out.Write($matches.Count)"
+  ].join("; ");
+  runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], (error, stdout = "") => {
+    if (error) return callback(error);
+    callback(null, Number(String(stdout).trim()) || 0);
+  });
+}
+
 function handleWorkspaceEndpoint(request, response, pathname) {
   const requestUrl = new URL(request.url, `http://${request.headers.host || `${host}:${publicPort}`}`);
   if (pathname === "/workspace/approval-policy" && request.method === "GET") {
@@ -686,6 +728,28 @@ function handleWorkspaceEndpoint(request, response, pathname) {
     blenderHealth((status) => json(response, 200, status));
     return true;
   }
+  if (pathname === "/workspace/browser-mode" && request.method === "GET") {
+    const runtime = browserRuntimeInfo();
+    return json(response, 200, { available: runtime.available, visible: runtime.visible, restarting: false });
+  }
+  if (pathname === "/workspace/browser-mode" && request.method === "POST") {
+    readJsonBody(request, (error, body) => {
+      if (error) return endpointError(response, error);
+      try {
+        const runtime = browserRuntimeInfo();
+        if (!runtime.available) return json(response, 404, { error: "The Playwright Brave bridge is not installed yet. Run the Seneschal installer first." });
+        if (typeof body.visible !== "boolean") throw new Error("Browser visibility must be true or false.");
+        fs.mkdirSync(path.dirname(runtime.flag), { recursive: true });
+        if (body.visible) fs.writeFileSync(runtime.flag, "visible\n", "utf8");
+        else if (fs.existsSync(runtime.flag)) fs.unlinkSync(runtime.flag);
+        restartPlaywrightBridge(runtime.launcher, (restartError, restarted = 0) => {
+          if (restartError) return endpointError(response, restartError);
+          return json(response, 200, { available: true, visible: body.visible, restarting: false, restarted, takesEffect: "next-browser-action" });
+        });
+      } catch (modeError) { return endpointError(response, modeError); }
+    });
+    return true;
+  }
   if (pathname === "/workspace/blender/open" && request.method === "POST") {
     if (!blenderExecutable || !fs.existsSync(blenderExecutable)) return json(response, 404, { error: "Blender was not found. Set its path in data/settings.json." });
     const child = spawn(blenderExecutable, [], { detached: true, stdio: "ignore", windowsHide: false });
@@ -784,9 +848,7 @@ function startClassicProxy() {
   listenWithRetry(classicProxy, classicPort, "Classic OpenCode");
 }
 
-function openWorkspace() {
-  console.log(`Seneschal: http://${host}:${publicPort}/`);
-  scheduleWeeklyBackup();
+function launchWorkspaceBrowser() {
   const url = `http://${host}:${publicPort}/?access=${workspaceToken}`;
   const braveCandidates = [
     "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
@@ -798,6 +860,28 @@ function openWorkspace() {
     ? spawn(brave, [url], { detached: true, stdio: "ignore", windowsHide: true })
     : spawn("cmd.exe", ["/d", "/s", "/c", "start", "", url], { detached: true, stdio: "ignore", windowsHide: true });
   opener.unref();
+}
+
+function openRunningWorkspace(attempt = 0) {
+  const request = http.get({ hostname: host, port: publicPort, path: "/", timeout: 700 }, (response) => {
+    response.resume();
+    launchWorkspaceBrowser();
+    setTimeout(() => process.exit(0), 80);
+  });
+  request.on("error", () => {
+    if (attempt >= 120) {
+      console.error("The existing Seneschal process did not become ready in time.");
+      return process.exit(1);
+    }
+    setTimeout(() => openRunningWorkspace(attempt + 1), 250);
+  });
+  request.on("timeout", () => request.destroy());
+}
+
+function openWorkspace() {
+  console.log(`Seneschal: http://${host}:${publicPort}/`);
+  scheduleWeeklyBackup();
+  launchWorkspaceBrowser();
 }
 
 function startServers() {
@@ -818,9 +902,11 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-ensureOpenCodeModelCatalog();
-checkUpstream((ready) => {
-  if (ready) return startServers();
-  startUpstream();
-  waitForUpstream();
-});
+if (ownsInstanceLock) {
+  ensureOpenCodeModelCatalog();
+  checkUpstream((ready) => {
+    if (ready) return startServers();
+    startUpstream();
+    waitForUpstream();
+  });
+}

@@ -1,6 +1,6 @@
 {
   "name": "seneschal-ai",
-  "version": "0.2.1-beta.6",
+  "version": "0.2.1-beta.8",
   "private": true,
   "description": "Seneschal is a private, local-first OpenCode workspace for Windows and WSL.",
   "license": "MIT",

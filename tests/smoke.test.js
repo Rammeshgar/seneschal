@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
 test("release contains the required portable files", () => {
-  for (const file of ["server.js", "app/index.html", "app/app.js", "app/styles.css", "install.ps1", "config/opencode.template.json", "docs/images/seneschal-workspace-night.png", "assets/social/seneschal-social-preview.png", "assets/social/seneschal-linkedin-launch.png"]) {
+  for (const file of ["server.js", "app/index.html", "app/app.js", "app/styles.css", "install.ps1", "scripts/start-playwright-mcp.cmd", "config/opencode.template.json", "docs/images/seneschal-workspace-night.png", "assets/social/seneschal-social-preview.png", "assets/social/seneschal-linkedin-launch.png"]) {
     assert.equal(fs.existsSync(path.join(root, file)), true, `${file} is missing`);
   }
 });
@@ -90,13 +90,46 @@ test("installer migrates legacy integrations before cleanup", () => {
   assert.match(installer, /openCodeJson\.before-seneschal/);
   assert.match(installer, /migrationVerified/);
   assert.match(installer, /Remove-Item -Recurse -Force -LiteralPath \$legacyInstall/);
+  assert.match(installer, /browserLauncherSource/);
+});
+
+test("messages can be pinned, archived, restored, and independently collapsed", () => {
+  const html = read("app/index.html");
+  const app = read("app/app.js");
+  assert.match(html, /pinnedMessageShelf/);
+  assert.match(html, /archivedMessagesButton/);
+  assert.match(html, /projectsCollapseButton/);
+  assert.match(html, /sessionsCollapseButton/);
+  assert.match(app, /seneschal-pinned-messages/);
+  assert.match(app, /seneschal-archived-messages/);
+  assert.match(app, /seneschal-pinned-sessions/);
+  assert.match(app, /toggleSessionPin/);
+  assert.match(app, /seneschal-archived-sessions/);
+  assert.match(app, /toggleSessionArchive/);
+  assert.match(app, /toggleMessagePin/);
+  assert.match(app, /toggleMessageArchive/);
+  assert.match(app, /toggleRailSection\("pins"\)/);
+});
+
+test("Playwright Brave can switch between hidden and visible agent-controlled mode", () => {
+  const launcher = read("scripts/start-playwright-mcp.cmd");
+  const server = read("server.js");
+  const app = read("app/app.js");
+  assert.match(launcher, /playwright-visible\.flag/);
+  assert.match(launcher, /DISPLAY_MODE=--headless/);
+  assert.match(launcher, /%DISPLAY_MODE% --isolated/);
+  assert.match(server, /\/workspace\/browser-mode/);
+  assert.match(server, /restartPlaywrightBridge/);
+  assert.match(server, /IndexOf\(\$target/);
+  assert.match(app, /toggleBrowserWindow/);
 });
 
 test("hidden launcher leaves a useful failure report", () => {
-  const launcher = read("scripts/launch.cmd");
-  assert.match(launcher, /data\\launcher\.log/);
+  const launcher = read("scripts/launch.ps1");
+  assert.match(launcher, /launcher\.log/);
+  assert.match(launcher, /launcher-\$PID\.log/);
   assert.match(launcher, /Windows\.MessageBox/);
-  assert.doesNotMatch(launcher, /if errorlevel 1 pause/);
+  assert.match(read("install.ps1"), /ExecutionPolicy Bypass -WindowStyle Hidden/);
 });
 
 test("server startup is locked against duplicate readiness signals", () => {
@@ -112,6 +145,11 @@ test("only one Seneschal process can claim the proxy ports", () => {
   assert.match(server, /seneschal-instance\.lock/);
   assert.match(server, /fs\.openSync\(instanceLockFile, "wx"\)/);
   assert.match(server, /processIsRunning\(existingProcessId\)/);
+  assert.match(server, /lockPredatesCurrentBoot/);
+  assert.match(server, /openRunningWorkspace/);
+  assert.match(server, /launchWorkspaceBrowser/);
+  assert.match(server, /already starting or running; opening the workspace/);
+  assert.match(server, /if \(ownsInstanceLock\)/);
   assert.match(server, /process\.on\("exit", releaseInstanceLock\)/);
 });
 

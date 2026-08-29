@@ -77,6 +77,11 @@ $browserRuntime = Join-Path $InstallDirectory 'browser-runtime'
 if ((Test-Path -LiteralPath $legacyBrowserRuntime) -and -not (Test-Path -LiteralPath $browserRuntime)) {
   Copy-Item -Recurse -Force -LiteralPath $legacyBrowserRuntime -Destination $browserRuntime
 }
+$browserLauncherSource = Join-Path $source 'scripts\start-playwright-mcp.cmd'
+$browserLauncher = Join-Path $browserRuntime 'start-playwright-mcp.cmd'
+if ((Test-Path -LiteralPath $browserRuntime) -and (Test-Path -LiteralPath $browserLauncherSource)) {
+  Copy-Item -Force -LiteralPath $browserLauncherSource -Destination $browserLauncher
+}
 $legacyBlenderLauncher = Join-Path $legacyInstall 'scripts\start-blender-mcp.cmd'
 $blenderLauncher = Join-Path $InstallDirectory 'scripts\start-blender-mcp.cmd'
 if ((Test-Path -LiteralPath $legacyBlenderLauncher) -and -not (Test-Path -LiteralPath $blenderLauncher)) {
@@ -144,8 +149,8 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 $shortcutPath = Join-Path $desktop 'Seneschal.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
-$shortcut.Arguments = '"' + (Join-Path $InstallDirectory 'scripts\launch.vbs') + '"'
+$shortcut.TargetPath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $InstallDirectory 'scripts\launch.ps1') + '"'
 $shortcut.WorkingDirectory = $InstallDirectory
 $shortcut.IconLocation = (Join-Path $InstallDirectory 'app\favicon.ico') + ',0'
 $shortcut.Description = 'Open Seneschal'
@@ -165,12 +170,16 @@ if ($migrationVerified) {
     'Seneschal v0.2.1 Beta 3',
     'Seneschal v0.2.1 Beta 4',
     'Seneschal v0.2.1 Beta 5',
+    'Seneschal v0.2.1 Beta 6',
+    'Seneschal v0.2.1 Beta 7',
     'seneschal-v0.2.0-beta.1.zip',
     'seneschal-v0.2.1-beta.1.zip',
     'seneschal-v0.2.1-beta.2.zip',
     'seneschal-v0.2.1-beta.3.zip',
     'seneschal-v0.2.1-beta.4.zip',
-    'seneschal-v0.2.1-beta.5.zip'
+    'seneschal-v0.2.1-beta.5.zip',
+    'seneschal-v0.2.1-beta.6.zip',
+    'seneschal-v0.2.1-beta.7.zip'
   )) {
     $obsoletePath = Join-Path $desktop $obsoleteDesktopItem
     if (Test-Path -LiteralPath $obsoletePath) { Remove-Item -Recurse -Force -LiteralPath $obsoletePath }

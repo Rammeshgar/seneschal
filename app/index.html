@@ -73,13 +73,13 @@
         </button>
 
         <div class="side-scroll">
-          <section class="rail-section">
-            <div class="rail-heading"><span>Projects</span><button id="addProjectButton" aria-label="Add project">+</button></div>
+          <section class="rail-section" id="projectsRailSection">
+            <div class="rail-heading"><span>Projects</span><span class="rail-heading-actions"><button class="rail-collapse-button" id="projectsCollapseButton" type="button" aria-label="Minimize projects" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button><button id="addProjectButton" aria-label="Add project">+</button></span></div>
             <div class="project-list" id="projectList"></div>
           </section>
 
-          <section class="rail-section session-section">
-            <div class="rail-heading"><span>Sessions</span><small id="sessionCount">0</small></div>
+          <section class="rail-section session-section" id="sessionsRailSection">
+            <div class="rail-heading"><span>Sessions</span><span class="rail-heading-actions"><small id="sessionCount">0</small><button class="rail-archive-button" id="archivedSessionsButton" type="button" aria-label="Show archived sessions" aria-pressed="false" hidden><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg><b id="archivedSessionsCount">0</b></button><button class="rail-collapse-button" id="sessionsCollapseButton" type="button" aria-label="Minimize sessions" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button></span></div>
             <div class="session-list" id="sessionList"></div>
           </section>
         </div>
@@ -106,6 +106,7 @@
               <span class="status-chip" id="sessionStatus"><i></i><span>Idle</span></span>
               <button class="icon-button" id="renameSessionButton" title="Rename session"><svg viewBox="0 0 24 24"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button>
               <button class="icon-button" id="exportSessionButton" title="Export conversation" aria-label="Export conversation"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button>
+              <button class="session-archive-toggle" id="archivedMessagesButton" type="button" title="Show archived messages" aria-label="Show archived messages" aria-pressed="false" hidden><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg><span id="archivedMessagesCount">0</span></button>
               <button class="icon-button" id="abortButton" title="Stop generation" disabled><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
               <button class="icon-button danger-button" id="deleteSessionButton" title="Delete conversation" aria-label="Delete conversation"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>
             </div>
@@ -134,6 +135,10 @@
           </div>
 
           <div class="message-scroll" id="messageScroll" hidden>
+            <section class="pinned-message-shelf" id="pinnedMessageShelf" hidden>
+              <header><span><svg viewBox="0 0 24 24"><path d="m8 3 8 8-3 1-4 6-1-6-3-3zM8 16l-4 4"/></svg><strong>Pinned messages</strong><small id="pinnedMessageCount">0</small></span><button type="button" id="pinnedMessagesCollapseButton" aria-label="Minimize pinned messages" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button></header>
+              <div class="pinned-message-list" id="pinnedMessageList"></div>
+            </section>
             <div class="message-list" id="messageList"></div>
             <nav class="message-map" id="messageMap" aria-label="Conversation steps" hidden></nav>
             <button class="resume-follow" id="resumeFollowButton" type="button" hidden>Jump to latest</button>
@@ -154,7 +159,7 @@
                 </label>
                 <button class="mic-button" id="micButton" type="button" title="Dictate or record a voice message" aria-label="Start voice dictation or recording" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/></svg><span>Mic</span></button>
                 <button class="talk-button" id="talkButton" type="button" title="Start turn-by-turn voice conversation" aria-label="Start Talk mode" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 12h2m2-4v8m3-11v14m3-11v8m3-6v4m3-3v2"/></svg><span>Talk</span><i aria-hidden="true"></i></button>
-                <button class="browser-compose-button" id="browserButton" type="button" title="Give the agent a browser task" aria-label="Open agent browser controls"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></svg><span>Browser</span></button>
+                <span class="browser-compose-group"><button class="browser-compose-button" id="browserButton" type="button" title="Give the agent a browser task" aria-label="Open agent browser controls"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></svg><span>Browser</span></button><button class="browser-window-button" id="browserWindowButton" type="button" title="Show the agent-controlled Brave window" aria-label="Show the agent-controlled Brave window" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg><span>Show</span></button></span>
                 <label class="select-wrap agent-select-wrap model-variant-wrap" id="modelVariantWrap" hidden><span>Thinking</span><select id="modelVariantSelect" aria-label="Model thinking level"></select></label>
                 <label class="select-wrap agent-select-wrap"><span>Agent</span><select id="agentSelect" aria-label="Agent mode"></select></label>
               </div>
@@ -187,7 +192,7 @@
             <div class="block-title"><span>Agent browser</span><small id="browserState">CHECKING</small></div>
             <div class="browser-card" id="browserCard">
               <div class="browser-card-top"><span class="browser-glyph"><i></i><i></i><i></i></span><div><strong>Playwright Brave</strong><small id="browserDetail">Checking the isolated Brave bridge</small></div></div>
-              <button type="button" id="browserTryButton"><span>New browser task</span><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+              <div class="browser-card-actions"><button type="button" id="browserTryButton"><span>New browser task</span><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button><button type="button" id="browserWindowCardButton"><span>Show window</span><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button></div>
             </div>
           </section>
 

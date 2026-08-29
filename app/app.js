@@ -22,6 +22,13 @@
     messages: [],
     permissions: [],
     collapsedMessageIDs: new Set(),
+    pinnedMessages: storage.get("seneschal-pinned-messages", {}),
+    archivedMessages: storage.get("seneschal-archived-messages", {}),
+    pinnedSessions: new Set(storage.get("seneschal-pinned-sessions", [])),
+    archivedSessions: new Set(storage.get("seneschal-archived-sessions", [])),
+    showArchivedSessions: false,
+    showArchivedMessages: false,
+    railSections: storage.get("seneschal-rail-sections", { projects: false, sessions: false, pins: false }),
     maximizedMessageID: "",
     editingMessageID: "",
     attachments: [],
@@ -65,14 +72,17 @@
     inspectedSkillSource: "",
     instructionsDirty: false,
     blender: { installed: false, bridge: false },
+    browserRuntime: { available: false, visible: false, restarting: false },
     paidUsage: { budget: 10, cost: null, percent: null },
     permissionTimer: null
   };
 
   const els = {
     connection: $("#connectionPill"), model: $("#modelSelect"), providerOrb: $("#providerOrb"),
-    projectList: $("#projectList"), sessionList: $("#sessionList"), sessionCount: $("#sessionCount"),
+    projectList: $("#projectList"), sessionList: $("#sessionList"), sessionCount: $("#sessionCount"), archivedSessionsButton: $("#archivedSessionsButton"), archivedSessionsCount: $("#archivedSessionsCount"),
+    projectsRail: $("#projectsRailSection"), sessionsRail: $("#sessionsRailSection"),
     welcome: $("#welcomeView"), messageScroll: $("#messageScroll"), messageList: $("#messageList"), messageMap: $("#messageMap"), resumeFollow: $("#resumeFollowButton"),
+    pinnedShelf: $("#pinnedMessageShelf"), pinnedList: $("#pinnedMessageList"), pinnedCount: $("#pinnedMessageCount"), archivedMessagesButton: $("#archivedMessagesButton"), archivedMessagesCount: $("#archivedMessagesCount"),
     sessionHeader: $("#sessionHeader"), sessionTitle: $("#sessionTitle"), projectEyebrow: $("#projectEyebrow"),
     sessionStatus: $("#sessionStatus"), abortButton: $("#abortButton"), deleteSessionButton: $("#deleteSessionButton"),
     prompt: $("#promptInput"), form: $("#composerForm"), send: $("#sendButton"), composerStop: $("#composerStopButton"),
@@ -90,7 +100,7 @@
     messageEditDialog: $("#messageEditDialog"), messageEditForm: $("#messageEditForm"), messageEditInput: $("#messageEditInput"), messageEditAttachmentNote: $("#messageEditAttachmentNote"),
     toastRegion: $("#toastRegion"), inspector: $("#inspector"), browserState: $("#browserState"),
     browserCard: $("#browserCard"), browserDetail: $("#browserDetail"), browserDialog: $("#browserDialog"),
-    browserForm: $("#browserForm"), browserUrl: $("#browserUrlInput"), browserTask: $("#browserTaskInput"), browserError: $("#browserError"),
+    browserForm: $("#browserForm"), browserUrl: $("#browserUrlInput"), browserTask: $("#browserTaskInput"), browserError: $("#browserError"), browserWindow: $("#browserWindowButton"), browserWindowCard: $("#browserWindowCardButton"),
     blenderState: $("#blenderState"), blenderCard: $("#blenderCard"), blenderDetail: $("#blenderDetail"),
     budgetState: $("#budgetState"), budgetMeter: $("#budgetMeter"), budgetAmount: $("#budgetAmount"),
     instructionDialog: $("#instructionDialog"), instructionSaveState: $("#instructionSaveState"), instructionError: $("#instructionError"),
@@ -670,6 +680,27 @@
     return [...new Set(list)];
   }
 
+  function syncRailSections() {
+    const sections = [
+      ["projects", els.projectsRail, $("#projectsCollapseButton"), "projects"],
+      ["sessions", els.sessionsRail, $("#sessionsCollapseButton"), "sessions"],
+      ["pins", els.pinnedShelf, $("#pinnedMessagesCollapseButton"), "pinned messages"]
+    ];
+    sections.forEach(([key, section, button, label]) => {
+      const collapsed = Boolean(state.railSections[key]);
+      section?.classList.toggle("collapsed", collapsed);
+      button?.setAttribute("aria-expanded", String(!collapsed));
+      button?.setAttribute("aria-label", `${collapsed ? "Expand" : "Minimize"} ${label}`);
+      button?.setAttribute("title", `${collapsed ? "Expand" : "Minimize"} ${label}`);
+    });
+  }
+
+  function toggleRailSection(key) {
+    state.railSections[key] = !state.railSections[key];
+    storage.set("seneschal-rail-sections", state.railSections);
+    syncRailSections();
+  }
+
   function renderProjects() {
     const dirs = directories();
     els.projectList.innerHTML = dirs.length ? dirs.map((dir) => {
@@ -678,23 +709,69 @@
       return `<button class="project-item${active}" data-directory="${escapeHTML(dir)}" title="${escapeHTML(dir)}"><span class="project-glyph">${escapeHTML(basename(dir).slice(0,1).toUpperCase())}</span><span>${escapeHTML(basename(dir))}</span><small>${count}</small></button>`;
     }).join("") : '<div class="empty-rail">Add a project folder to begin.</div>';
     $$(".project-item", els.projectList).forEach((button) => button.addEventListener("click", () => switchDirectory(button.dataset.directory)));
+    syncRailSections();
   }
 
   function sessionStatus(sessionID) { return state.statuses[sessionID]?.type || "idle"; }
 
+  function toggleSessionPin(sessionID) {
+    if (state.archivedSessions.has(sessionID)) { toast("Restore this session before pinning it.", "warn"); return; }
+    const active = !state.pinnedSessions.has(sessionID);
+    if (active) state.pinnedSessions.add(sessionID); else state.pinnedSessions.delete(sessionID);
+    storage.set("seneschal-pinned-sessions", [...state.pinnedSessions]);
+    renderSessions();
+    toast(active ? "Session pinned to the top." : "Session unpinned.");
+  }
+
+  async function toggleSessionArchive(sessionID) {
+    const active = !state.archivedSessions.has(sessionID);
+    if (active && ["busy", "retry"].includes(sessionStatus(sessionID))) { toast("Stop this session before archiving it.", "warn"); return; }
+    if (active) {
+      state.archivedSessions.add(sessionID);
+      state.pinnedSessions.delete(sessionID);
+    } else state.archivedSessions.delete(sessionID);
+    storage.set("seneschal-archived-sessions", [...state.archivedSessions]);
+    storage.set("seneschal-pinned-sessions", [...state.pinnedSessions]);
+    if (!state.archivedSessions.size) state.showArchivedSessions = false;
+    if (active && state.currentSessionID === sessionID) {
+      const next = state.sessions
+        .filter((session) => session.directory === state.currentDirectory && !session.parentID && !state.archivedSessions.has(session.id))
+        .sort((a, b) => Number(state.pinnedSessions.has(b.id)) - Number(state.pinnedSessions.has(a.id)) || (b.time?.updated || 0) - (a.time?.updated || 0))[0];
+      state.currentSessionID = next?.id || "";
+      state.messages = [];
+      state.showArchivedMessages = false;
+      storage.set("atelier-session", state.currentSessionID);
+      renderAll();
+      if (next) await refreshMessages(true);
+    } else renderSessions();
+    toast(active ? "Session archived locally." : "Session restored.");
+  }
+
   function renderSessions() {
-    const sessions = state.sessions
+    const allSessions = state.sessions
       .filter((session) => session.directory === state.currentDirectory && !session.parentID)
-      .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0));
+      .sort((a, b) => Number(state.pinnedSessions.has(b.id)) - Number(state.pinnedSessions.has(a.id)) || (b.time?.updated || 0) - (a.time?.updated || 0));
+    const archivedCount = allSessions.filter((session) => state.archivedSessions.has(session.id)).length;
+    const sessions = allSessions.filter((session) => state.showArchivedSessions || !state.archivedSessions.has(session.id));
     els.sessionCount.textContent = String(sessions.length);
+    els.archivedSessionsButton.hidden = !archivedCount;
+    els.archivedSessionsButton.setAttribute("aria-pressed", String(state.showArchivedSessions));
+    els.archivedSessionsButton.setAttribute("aria-label", `${state.showArchivedSessions ? "Hide" : "Show"} ${archivedCount} archived session${archivedCount === 1 ? "" : "s"}`);
+    els.archivedSessionsButton.title = `${state.showArchivedSessions ? "Hide" : "Show"} archived sessions`;
+    els.archivedSessionsCount.textContent = String(archivedCount);
     els.sessionList.innerHTML = sessions.length ? sessions.map((session) => {
       const active = session.id === state.currentSessionID ? " active" : "";
       const status = sessionStatus(session.id);
       const title = session.title || "Untitled session";
-      return `<div class="session-item${active}"><button class="session-open-button" data-session="${escapeHTML(session.id)}" title="Open ${escapeHTML(title)}"><span class="session-copy"><strong>${escapeHTML(title)}</strong><small>${timeAgo(session.time?.updated)} · ${escapeHTML(session.model?.id || "agent")}</small></span><i class="session-dot ${status}"></i></button><button class="session-rename-button" data-session="${escapeHTML(session.id)}" aria-label="Rename ${escapeHTML(title)}" title="Rename without opening"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button></div>`;
+      const pinned = state.pinnedSessions.has(session.id);
+      const archived = state.archivedSessions.has(session.id);
+      return `<div class="session-item${active}${pinned ? " pinned" : ""}${archived ? " archived" : ""}"><button class="session-open-button" data-session="${escapeHTML(session.id)}" title="Open ${escapeHTML(title)}"><span class="session-copy"><strong>${escapeHTML(title)}</strong><small>${timeAgo(session.time?.updated)} · ${escapeHTML(session.model?.id || "agent")}</small></span><i class="session-dot ${status}"></i></button><button class="session-pin-button${pinned ? " active" : ""}" data-session="${escapeHTML(session.id)}" aria-label="${pinned ? "Unpin" : "Pin"} ${escapeHTML(title)}" title="${pinned ? "Unpin session" : "Pin session to top"}"${archived ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 8-3 1-4 6-1-6-3-3zM8 16l-4 4"/></svg></button><button class="session-archive-button" data-session="${escapeHTML(session.id)}" aria-label="${archived ? "Restore" : "Archive"} ${escapeHTML(title)}" title="${archived ? "Restore session" : "Archive session"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg></button><button class="session-rename-button" data-session="${escapeHTML(session.id)}" aria-label="Rename ${escapeHTML(title)}" title="Rename without opening"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button></div>`;
     }).join("") : '<div class="empty-rail">No sessions in this project yet.</div>';
     $$(".session-open-button", els.sessionList).forEach((button) => button.addEventListener("click", () => selectSession(button.dataset.session)));
+    $$(".session-pin-button", els.sessionList).forEach((button) => button.addEventListener("click", () => toggleSessionPin(button.dataset.session)));
+    $$(".session-archive-button", els.sessionList).forEach((button) => button.addEventListener("click", () => toggleSessionArchive(button.dataset.session)));
     $$(".session-rename-button", els.sessionList).forEach((button) => button.addEventListener("click", () => renameSession(button.dataset.session)));
+    syncRailSections();
   }
 
   function flattenModels() {
@@ -831,13 +908,25 @@
   function renderBrowser() {
     const status = browserConnection();
     const connected = status === "connected";
+    const runtimeAvailable = Boolean(state.browserRuntime?.available);
+    const visible = Boolean(state.browserRuntime?.visible);
     els.browserState.textContent = connected ? "READY" : status.toUpperCase();
     els.browserState.style.color = connected ? "var(--forest)" : "var(--danger)";
     els.browserCard.className = `browser-card ${connected ? "connected" : "error"}`;
     els.browserDetail.textContent = connected ? "Navigate, click, type, inspect, screenshot" : "Browser bridge is not available";
     $("#browserTryButton").disabled = !connected;
     $("#browserButton").disabled = !connected;
-    $("#settingsBrowser").textContent = connected ? "Connected" : "Unavailable";
+    [els.browserWindow, els.browserWindowCard].forEach((button) => {
+      if (!button) return;
+      button.disabled = !runtimeAvailable || Boolean(state.browserRuntime?.restarting);
+      button.setAttribute("aria-pressed", String(visible));
+      const label = visible ? "Hide" : "Show";
+      const span = $("span", button);
+      if (span) span.textContent = button === els.browserWindowCard ? `${label} window` : label;
+      button.setAttribute("aria-label", `${label} the agent-controlled Brave window`);
+      button.setAttribute("title", `${label} the agent-controlled Brave window`);
+    });
+    $("#settingsBrowser").textContent = !runtimeAvailable ? "Unavailable" : visible ? "Visible Brave" : connected ? "Connected · hidden" : "Hidden mode";
   }
 
   function blenderMcpConnection() {
@@ -872,6 +961,26 @@
   function refreshWorkspaceMeta() {
     workspace("/workspace/blender-health").then((blender) => { state.blender = blender; renderBlender(); }).catch(() => renderBlender());
     workspace("/workspace/usage").then((usage) => { state.paidUsage = usage; renderPaidUsage(); }).catch(() => renderPaidUsage());
+    workspace("/workspace/browser-mode").then((runtime) => { state.browserRuntime = runtime; renderBrowser(); }).catch(() => renderBrowser());
+  }
+
+  async function toggleBrowserWindow() {
+    if (!state.browserRuntime?.available || state.browserRuntime?.restarting) return;
+    const visible = !state.browserRuntime.visible;
+    state.browserRuntime.restarting = true;
+    renderBrowser();
+    try {
+      state.browserRuntime = await workspace("/workspace/browser-mode", { method: "POST", body: { visible } });
+      renderBrowser();
+      toast(visible
+        ? "Visible Brave enabled. The agent-controlled window will appear on its next browser action."
+        : "Hidden browser mode enabled. The agent browser will run without a visible window.");
+      setTimeout(() => refreshDirectoryData(), 1200);
+    } catch (error) {
+      state.browserRuntime.restarting = false;
+      renderBrowser();
+      toast(`Could not change browser visibility: ${error.message}`, "error");
+    }
   }
 
   async function openBlender() {
@@ -1279,16 +1388,99 @@
     return text ? "Writing the response" : "Starting the task";
   }
 
+  function storedMessageIDs(collection, sessionID = state.currentSessionID) {
+    return new Set(Array.isArray(collection?.[sessionID]) ? collection[sessionID] : []);
+  }
+
+  function saveMessageIDs(collection, storageKey, ids, sessionID = state.currentSessionID) {
+    if (!sessionID) return;
+    collection[sessionID] = [...ids];
+    if (!collection[sessionID].length) delete collection[sessionID];
+    storage.set(storageKey, collection);
+  }
+
+  function toggleMessagePin(messageID) {
+    const pinned = storedMessageIDs(state.pinnedMessages);
+    const archived = storedMessageIDs(state.archivedMessages);
+    if (archived.has(messageID)) { toast("Restore this message before pinning it.", "warn"); return; }
+    const active = !pinned.has(messageID);
+    if (active) pinned.add(messageID); else pinned.delete(messageID);
+    saveMessageIDs(state.pinnedMessages, "seneschal-pinned-messages", pinned);
+    renderMessages();
+    toast(active ? "Message pinned for this conversation." : "Message unpinned.");
+  }
+
+  function toggleMessageArchive(messageID) {
+    const archived = storedMessageIDs(state.archivedMessages);
+    const pinned = storedMessageIDs(state.pinnedMessages);
+    const active = !archived.has(messageID);
+    if (active) {
+      archived.add(messageID);
+      pinned.delete(messageID);
+    } else {
+      archived.delete(messageID);
+    }
+    saveMessageIDs(state.archivedMessages, "seneschal-archived-messages", archived);
+    saveMessageIDs(state.pinnedMessages, "seneschal-pinned-messages", pinned);
+    if (!archived.size) state.showArchivedMessages = false;
+    renderMessages();
+    toast(active ? "Message archived locally. Use the archive counter to restore it." : "Message restored.");
+  }
+
+  function locateMessage(messageID) {
+    const archived = storedMessageIDs(state.archivedMessages);
+    if (archived.has(messageID) && !state.showArchivedMessages) {
+      state.showArchivedMessages = true;
+      renderMessages();
+    }
+    requestAnimationFrame(() => {
+      const target = $(`[data-message="${CSS.escape(messageID)}"]`, els.messageList);
+      if (!target) return;
+      state.userScrolledAway = true;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add("message-located");
+      setTimeout(() => target.classList.remove("message-located"), 1100);
+    });
+  }
+
+  function renderPinnedMessages(pinned, archived) {
+    const messages = state.messages.filter((message) => pinned.has(message.info?.id) && !archived.has(message.info?.id));
+    els.pinnedShelf.hidden = !messages.length;
+    els.pinnedCount.textContent = String(messages.length);
+    els.pinnedList.innerHTML = messages.map((message, index) => {
+      const role = message.info?.role === "user" ? "You" : "Seneschal";
+      return `<button type="button" class="pinned-message-item" data-pinned-message="${escapeHTML(message.info?.id || "")}" title="Jump to pinned message"><strong>${escapeHTML(role)}</strong><span>${escapeHTML(messagePreview(message, index))}</span></button>`;
+    }).join("");
+    $$('[data-pinned-message]', els.pinnedList).forEach((button) => button.addEventListener("click", () => locateMessage(button.dataset.pinnedMessage)));
+    syncRailSections();
+  }
+
   function renderMessages(scroll = false) {
     const session = selectedSession();
     const hasSession = Boolean(session);
     document.documentElement.dataset.sessionActive = hasSession ? "true" : "false";
     els.welcome.hidden = hasSession;
     els.messageScroll.hidden = !hasSession;
-    if (!hasSession) return;
+    if (!hasSession) {
+      els.pinnedShelf.hidden = true;
+      els.pinnedList.innerHTML = "";
+      els.archivedMessagesButton.hidden = true;
+      els.messageList.innerHTML = "";
+      renderMessageMap([]);
+      return;
+    }
+    const pinned = storedMessageIDs(state.pinnedMessages, session.id);
+    const archived = storedMessageIDs(state.archivedMessages, session.id);
+    const visibleMessages = state.messages.filter((message) => state.showArchivedMessages || !archived.has(message.info?.id));
     if (state.maximizedMessageID && !state.messages.some((message) => message.info?.id === state.maximizedMessageID)) state.maximizedMessageID = "";
     $("#appShell").classList.toggle("message-maximized", Boolean(state.maximizedMessageID));
-    const rows = state.messages.map((message) => {
+    els.archivedMessagesButton.hidden = !archived.size;
+    els.archivedMessagesButton.setAttribute("aria-pressed", String(state.showArchivedMessages));
+    els.archivedMessagesButton.setAttribute("aria-label", `${state.showArchivedMessages ? "Hide" : "Show"} ${archived.size} archived message${archived.size === 1 ? "" : "s"}`);
+    els.archivedMessagesButton.setAttribute("title", `${state.showArchivedMessages ? "Hide" : "Show"} archived messages`);
+    els.archivedMessagesCount.textContent = String(archived.size);
+    renderPinnedMessages(pinned, archived);
+    const rows = visibleMessages.map((message) => {
       const info = message.info || {};
       const role = info.role === "user" ? "user" : "assistant";
       const providerError = info.error?.data?.message || info.error?.message || "";
@@ -1298,18 +1490,22 @@
       const avatar = role === "user" ? "YOU" : "DS";
       const kind = role === "user" ? "input" : "output";
       const userActions = role === "user" ? '<button type="button" class="message-edit-button" aria-label="Edit this message" title="Edit and retry this message">Edit</button><button type="button" class="message-retry-button" aria-label="Retry this message" title="Retry from this point">Retry</button>' : "";
-      const controls = `<span class="message-view-controls">${userActions}<button type="button" class="message-size-button" aria-label="Minimize ${kind}" title="Minimize or expand ${kind}">Minimize</button><button type="button" class="message-maximize-button" aria-label="Maximize ${kind}" title="Maximize ${kind}">Maximize</button><button type="button" class="message-copy-button" aria-label="Copy ${kind}" title="Copy ${kind}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span></button></span>`;
+      const isPinned = pinned.has(info.id);
+      const isArchived = archived.has(info.id);
+      const controls = `<span class="message-view-controls">${userActions}<button type="button" class="message-pin-button${isPinned ? " active" : ""}" aria-label="${isPinned ? "Unpin" : "Pin"} this message" title="${isPinned ? "Unpin" : "Pin"} this message">${isPinned ? "Unpin" : "Pin"}</button><button type="button" class="message-archive-button" aria-label="${isArchived ? "Restore" : "Archive"} this message" title="${isArchived ? "Restore" : "Archive"} this message locally">${isArchived ? "Restore" : "Archive"}</button><button type="button" class="message-size-button" aria-label="Minimize ${kind}" title="Minimize or expand ${kind}">Minimize</button><button type="button" class="message-maximize-button" aria-label="Maximize ${kind}" title="Maximize ${kind}">Maximize</button><button type="button" class="message-copy-button" aria-label="Copy ${kind}" title="Copy ${kind}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span></button></span>`;
       const collapsed = state.collapsedMessageIDs.has(info.id) ? " collapsed" : "";
       const maximized = state.maximizedMessageID === info.id ? " maximized" : "";
-      return `<article class="message ${role}${collapsed}${maximized}" data-message="${escapeHTML(info.id || "")}"><div class="message-avatar">${avatar}</div><div class="message-body"><div class="message-meta"><strong>${escapeHTML(label)}</strong><span>${info.time?.created ? new Date(info.time.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>${controls}</div><div class="message-content">${parts}</div></div></article>`;
+      return `<article class="message ${role}${isPinned ? " pinned" : ""}${isArchived ? " archived" : ""}${collapsed}${maximized}" data-message="${escapeHTML(info.id || "")}"><div class="message-avatar">${avatar}</div><div class="message-body"><div class="message-meta"><strong>${escapeHTML(label)}</strong><span>${info.time?.created ? new Date(info.time.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>${controls}</div><div class="message-content">${parts}</div></div></article>`;
     }).join("");
     const busy = sessionStatus(session.id) === "busy";
     const liveActivity = busy ? escapeHTML(liveActivityText()) : "";
     els.messageList.innerHTML = rows + (busy ? `<article class="message assistant live-progress-message"><div class="message-avatar">DS</div><div class="message-body"><div class="live-activity"><span class="live-activity-pulse"><i></i><i></i><i></i></span><strong>Live activity</strong><span>${liveActivity}</span></div></div></article>` : "");
-    renderMessageMap();
+    renderMessageMap(visibleMessages);
     $$(".message-copy-button", els.messageList).forEach((button) => button.addEventListener("click", () => copyRenderedMessage(button)));
     $$(".message-retry-button", els.messageList).forEach((button) => button.addEventListener("click", () => retryUserMessage(button.closest(".message")?.dataset.message)));
     $$(".message-edit-button", els.messageList).forEach((button) => button.addEventListener("click", () => openMessageEditor(button.closest(".message")?.dataset.message)));
+    $$(".message-pin-button", els.messageList).forEach((button) => button.addEventListener("click", () => toggleMessagePin(button.closest(".message")?.dataset.message)));
+    $$(".message-archive-button", els.messageList).forEach((button) => button.addEventListener("click", () => toggleMessageArchive(button.closest(".message")?.dataset.message)));
     $$(".message-size-button", els.messageList).forEach((button) => {
       const message = button.closest(".message");
       const id = message.dataset.message;
@@ -1364,21 +1560,16 @@
     return String(text || tool || `Step ${index + 1}`).replace(/\s+/g, " ").trim().slice(0, 72);
   }
 
-  function renderMessageMap() {
+  function renderMessageMap(messages = state.messages) {
     if (!els.messageMap) return;
-    const visible = state.messages.filter((message) => (message.parts || []).some((part) => ["text", "tool", "reasoning", "file", "patch"].includes(part.type)));
+    const visible = messages.filter((message) => (message.parts || []).some((part) => ["text", "tool", "reasoning", "file", "patch"].includes(part.type)));
     els.messageMap.hidden = visible.length < 2;
     els.messageMap.innerHTML = visible.map((message, index) => {
       const role = message.info?.role === "user" ? "You" : "Seneschal";
       return `<button type="button" class="message-map-step ${message.info?.role === "user" ? "user" : "assistant"}" data-jump-message="${escapeHTML(message.info?.id || "")}" aria-label="Jump to ${escapeHTML(role)} message ${index + 1}" title="${escapeHTML(`${index + 1}. ${role}: ${messagePreview(message, index)}`)}"><i></i><span>${index + 1}</span></button>`;
     }).join("");
     $$('[data-jump-message]', els.messageMap).forEach((button) => button.addEventListener("click", () => {
-      const target = $(`[data-message="${CSS.escape(button.dataset.jumpMessage)}"]`, els.messageList);
-      if (!target) return;
-      state.userScrolledAway = true;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.classList.add("message-located");
-      setTimeout(() => target.classList.remove("message-located"), 1100);
+      locateMessage(button.dataset.jumpMessage);
     }));
   }
 
@@ -1573,11 +1764,13 @@
   async function switchDirectory(directory) {
     if (!directory || directory === state.currentDirectory) return;
     state.currentDirectory = directory;
+    state.showArchivedSessions = false;
     storage.set("atelier-directory", directory);
     const sessions = state.sessions.filter((session) => session.directory === directory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0));
     state.currentSessionID = sessions[0]?.id || "";
     storage.set("atelier-session", state.currentSessionID);
     state.messages = [];
+    state.showArchivedMessages = false;
     state.userScrolledAway = false;
     renderAll();
     await refreshDirectoryData();
@@ -1597,6 +1790,7 @@
       connectEvents();
     }
     state.messages = [];
+    state.showArchivedMessages = false;
     state.userScrolledAway = false;
     renderAll();
     await refreshMessages(true);
@@ -1610,6 +1804,7 @@
       state.currentSessionID = session.id;
       storage.set("atelier-session", session.id);
       state.messages = [];
+      state.showArchivedMessages = false;
       state.userScrolledAway = false;
       log("session.created", session.id);
       renderAll();
@@ -1758,6 +1953,14 @@
       await api(`/session/${encodeURIComponent(deletedID)}`, { directory: session.directory, method: "DELETE" });
       state.sessions = state.sessions.filter((item) => item.id !== deletedID);
       delete state.statuses[deletedID];
+      state.pinnedSessions.delete(deletedID);
+      state.archivedSessions.delete(deletedID);
+      storage.set("seneschal-pinned-sessions", [...state.pinnedSessions]);
+      storage.set("seneschal-archived-sessions", [...state.archivedSessions]);
+      delete state.pinnedMessages[deletedID];
+      delete state.archivedMessages[deletedID];
+      storage.set("seneschal-pinned-messages", state.pinnedMessages);
+      storage.set("seneschal-archived-messages", state.archivedMessages);
       state.currentSessionID = "";
       state.messages = [];
       storage.set("atelier-session", "");
@@ -2416,6 +2619,10 @@
     $("#motionSwitch").addEventListener("click", cycleMotion);
     $("#newSessionButton").addEventListener("click", () => newSession());
     $("#addProjectButton").addEventListener("click", openProjectDialog);
+    $("#projectsCollapseButton").addEventListener("click", () => toggleRailSection("projects"));
+    $("#sessionsCollapseButton").addEventListener("click", () => toggleRailSection("sessions"));
+    els.archivedSessionsButton.addEventListener("click", () => { state.showArchivedSessions = !state.showArchivedSessions; renderSessions(); });
+    $("#pinnedMessagesCollapseButton").addEventListener("click", () => toggleRailSection("pins"));
     $("#refreshButton").addEventListener("click", () => refreshAll(true));
     $("#commandButton").addEventListener("click", openCommands);
     $("#settingsButton").addEventListener("click", openSettings);
@@ -2500,6 +2707,12 @@
     els.talk.addEventListener("click", toggleConversationMode);
     $("#browserButton").addEventListener("click", openBrowserDialog);
     $("#browserTryButton").addEventListener("click", openBrowserDialog);
+    [els.browserWindow, els.browserWindowCard].forEach((button) => button?.addEventListener("click", toggleBrowserWindow));
+    els.archivedMessagesButton.addEventListener("click", () => {
+      state.showArchivedMessages = !state.showArchivedMessages;
+      renderMessages();
+      toast(state.showArchivedMessages ? "Showing archived messages." : "Archived messages hidden.");
+    });
     els.browserForm.addEventListener("submit", (event) => { if (event.submitter?.id === "runBrowserButton") runBrowserTask(event); });
     $$(".quick-card").forEach((button) => button.addEventListener("click", () => { els.prompt.value = button.dataset.prompt; autoSizePrompt(); els.prompt.focus(); }));
     els.abortButton.addEventListener("click", abortSession);

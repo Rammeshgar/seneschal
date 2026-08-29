@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1-beta.8 — 2026-08-29
+
+- Adds per-conversation message pinning with a compact pinned-message shelf
+- Adds persistent session pinning with pinned sessions sorted to the top
+- Adds reversible local session archiving with an archive counter and restore action
+- Adds reversible local message archiving with a session archive counter
+- Adds independent minimize controls for Projects, Sessions, and pinned messages
+- Adds a visible Brave switch for the actual Playwright MCP browser
+- Restarts only Seneschal's Playwright bridge when browser visibility changes
+
+## 0.2.1-beta.7 — 2026-08-29
+
+- Makes every Desktop shortcut click open Seneschal directly in Brave
+- Reopens the authenticated workspace when the background server is already running
+- Waits for an in-progress startup instead of exiting silently
+- Discards stale instance locks left behind by a previous Windows boot
+
 ## 0.2.1-beta.6 — 2026-08-29
 
 - Reworked Workspace Pulse into fixed six-second buckets with stable magnitude scaling

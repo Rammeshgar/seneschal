@@ -4,7 +4,7 @@
 
 ![Seneschal — one calm workspace for models, tools, and control](assets/social/seneschal-social-preview.png)
 
-Seneschal gives OpenCode a focused, personal interface on Windows and WSL: model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, attachments, voice input, optional browser and Blender status, and a matte day/night visual system.
+Seneschal gives OpenCode a focused, personal interface on Windows and WSL: model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, pinned and archived messages, attachments, voice input, optional browser and Blender status, and a matte day/night visual system.
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
 
@@ -32,7 +32,7 @@ The image above is a privacy-safe product illustration based on the real interfa
 - OpenCode installed and working inside that WSL distribution
 - At least one model provider connected through OpenCode
 
-Brave is preferred when installed. Otherwise, Seneschal opens in the Windows default browser. Blender and browser automation are optional and require their own local integrations.
+Brave is preferred when installed. Otherwise, Seneschal opens in the Windows default browser. When the Playwright integration is installed, its Browser control can switch the agent-controlled Brave window between hidden and visible mode. Blender and browser automation remain optional and require their own local integrations.
 
 ## Install
 
