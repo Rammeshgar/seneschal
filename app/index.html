@@ -78,6 +78,11 @@
             <div class="project-list" id="projectList"></div>
           </section>
 
+          <section class="rail-section pinned-sessions-section" id="pinnedSessionsRailSection">
+            <div class="rail-heading"><span>Pinned sessions</span><span class="rail-heading-actions"><small id="pinnedSessionCount">0</small><button class="rail-collapse-button" id="pinnedSessionsCollapseButton" type="button" aria-label="Minimize pinned sessions" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button></span></div>
+            <div class="session-list pinned-session-list" id="pinnedSessionList"></div>
+          </section>
+
           <section class="rail-section session-section" id="sessionsRailSection">
             <div class="rail-heading"><span>Sessions</span><span class="rail-heading-actions"><small id="sessionCount">0</small><button class="rail-archive-button" id="archivedSessionsButton" type="button" aria-label="Show archived sessions" aria-pressed="false" hidden><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg><b id="archivedSessionsCount">0</b></button><button class="rail-collapse-button" id="sessionsCollapseButton" type="button" aria-label="Minimize sessions" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button></span></div>
             <div class="session-list" id="sessionList"></div>
@@ -261,9 +266,20 @@
           <button class="setting-card interactive-setting" type="button" id="settingsApprovalButton"><span>Approval policy</span><strong>Ask before action</strong><small>Review Plan and Build permissions</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsBackupsButton"><span>Private backups</span><strong>Weekly</strong><small>Create a sanitized backup now</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsCommandsButton"><span>Commands</span><strong id="settingsCommands">Loading…</strong><small>Browse OpenCode commands, skills, and session references</small></button>
+          <button class="setting-card interactive-setting archive-setting" type="button" id="settingsArchivesButton"><span>Archived sessions</span><strong id="settingsArchives">0 archived</strong><small>Review and restore conversations hidden from the sidebar</small></button>
         </div>
         <p class="settings-note"><strong>Privacy, honestly:</strong> this interface runs locally, but your selected cloud model receives prompts and any file, browser, or Blender context needed for the task. Provider sign-in and API keys stay in OpenCode.</p>
         <div class="modal-actions"><button type="button" id="backupNowButton" class="secondary-button">Back up now</button><button value="cancel" class="secondary-button">Close</button><button type="button" id="settingsClassicButton" class="primary-button">Open advanced settings</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal archive-manager-modal" id="archivedSessionsDialog">
+      <form method="dialog">
+        <div class="modal-kicker">CONVERSATION ARCHIVE</div>
+        <h2>Archived sessions</h2>
+        <p>Archiving hides a session locally without deleting its OpenCode conversation. Restore any session to return it to the sidebar.</p>
+        <div class="archive-manager-list" id="archivedSessionManagerList"></div>
+        <div class="modal-actions"><button value="cancel" class="secondary-button">Close</button></div>
       </form>
     </dialog>
 

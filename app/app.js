@@ -28,7 +28,7 @@
     archivedSessions: new Set(storage.get("seneschal-archived-sessions", [])),
     showArchivedSessions: false,
     showArchivedMessages: false,
-    railSections: storage.get("seneschal-rail-sections", { projects: false, sessions: false, pins: false }),
+    railSections: storage.get("seneschal-rail-sections", { projects: false, pinnedSessions: false, sessions: false, pins: false }),
     maximizedMessageID: "",
     editingMessageID: "",
     attachments: [],
@@ -79,8 +79,8 @@
 
   const els = {
     connection: $("#connectionPill"), model: $("#modelSelect"), providerOrb: $("#providerOrb"),
-    projectList: $("#projectList"), sessionList: $("#sessionList"), sessionCount: $("#sessionCount"), archivedSessionsButton: $("#archivedSessionsButton"), archivedSessionsCount: $("#archivedSessionsCount"),
-    projectsRail: $("#projectsRailSection"), sessionsRail: $("#sessionsRailSection"),
+    projectList: $("#projectList"), pinnedSessionList: $("#pinnedSessionList"), pinnedSessionCount: $("#pinnedSessionCount"), sessionList: $("#sessionList"), sessionCount: $("#sessionCount"), archivedSessionsButton: $("#archivedSessionsButton"), archivedSessionsCount: $("#archivedSessionsCount"),
+    projectsRail: $("#projectsRailSection"), pinnedSessionsRail: $("#pinnedSessionsRailSection"), sessionsRail: $("#sessionsRailSection"),
     welcome: $("#welcomeView"), messageScroll: $("#messageScroll"), messageList: $("#messageList"), messageMap: $("#messageMap"), resumeFollow: $("#resumeFollowButton"),
     pinnedShelf: $("#pinnedMessageShelf"), pinnedList: $("#pinnedMessageList"), pinnedCount: $("#pinnedMessageCount"), archivedMessagesButton: $("#archivedMessagesButton"), archivedMessagesCount: $("#archivedMessagesCount"),
     sessionHeader: $("#sessionHeader"), sessionTitle: $("#sessionTitle"), projectEyebrow: $("#projectEyebrow"),
@@ -94,7 +94,7 @@
     usagePercent: $("#usagePercent"), usageMeter: $("#usageMeter"), usageDetail: $("#usageDetail"),
     permissionDock: $("#permissionDock"), projectDialog: $("#projectDialog"), projectForm: $("#projectForm"),
     projectPath: $("#projectPathInput"), projectError: $("#projectError"),
-    settingsDialog: $("#settingsDialog"), providerDialog: $("#providerDialog"), approvalDialog: $("#approvalDialog"), chatGPTDialog: $("#chatGPTDialog"), commandDialog: $("#commandDialog"), commandInput: $("#commandInput"),
+    settingsDialog: $("#settingsDialog"), archiveDialog: $("#archivedSessionsDialog"), archiveManagerList: $("#archivedSessionManagerList"), providerDialog: $("#providerDialog"), approvalDialog: $("#approvalDialog"), chatGPTDialog: $("#chatGPTDialog"), commandDialog: $("#commandDialog"), commandInput: $("#commandInput"),
     commandResults: $("#commandResults"), protocolDialog: $("#protocolDialog"), protocolLog: $("#protocolLog"),
     deleteDialog: $("#deleteSessionDialog"), deleteForm: $("#deleteSessionForm"), deleteTitle: $("#deleteSessionTitle"),
     messageEditDialog: $("#messageEditDialog"), messageEditForm: $("#messageEditForm"), messageEditInput: $("#messageEditInput"), messageEditAttachmentNote: $("#messageEditAttachmentNote"),
@@ -683,6 +683,7 @@
   function syncRailSections() {
     const sections = [
       ["projects", els.projectsRail, $("#projectsCollapseButton"), "projects"],
+      ["pinnedSessions", els.pinnedSessionsRail, $("#pinnedSessionsCollapseButton"), "pinned sessions"],
       ["sessions", els.sessionsRail, $("#sessionsCollapseButton"), "sessions"],
       ["pins", els.pinnedShelf, $("#pinnedMessagesCollapseButton"), "pinned messages"]
     ];
@@ -747,30 +748,42 @@
     toast(active ? "Session archived locally." : "Session restored.");
   }
 
+  function sessionRailItem(session) {
+    const active = session.id === state.currentSessionID ? " active" : "";
+    const status = sessionStatus(session.id);
+    const title = session.title || "Untitled session";
+    const pinned = state.pinnedSessions.has(session.id);
+    const archived = state.archivedSessions.has(session.id);
+    return `<div class="session-item${active}${pinned ? " pinned" : ""}${archived ? " archived" : ""}"><button class="session-open-button" data-session="${escapeHTML(session.id)}" title="Open ${escapeHTML(title)}"><span class="session-copy"><strong>${escapeHTML(title)}</strong><small>${timeAgo(session.time?.updated)} · ${escapeHTML(session.model?.id || "agent")}</small></span><i class="session-dot ${status}"></i></button><button class="session-pin-button${pinned ? " active" : ""}" data-session="${escapeHTML(session.id)}" aria-label="${pinned ? "Unpin" : "Pin"} ${escapeHTML(title)}" title="${pinned ? "Unpin session" : "Pin session to top"}"${archived ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 8-3 1-4 6-1-6-3-3zM8 16l-4 4"/></svg></button><button class="session-archive-button" data-session="${escapeHTML(session.id)}" aria-label="${archived ? "Restore" : "Archive"} ${escapeHTML(title)}" title="${archived ? "Restore session" : "Archive session"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg></button><button class="session-rename-button" data-session="${escapeHTML(session.id)}" aria-label="Rename ${escapeHTML(title)}" title="Rename without opening"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button></div>`;
+  }
+
+  function bindSessionRailActions() {
+    [els.pinnedSessionList, els.sessionList].forEach((list) => {
+      $$(".session-open-button", list).forEach((button) => button.addEventListener("click", () => selectSession(button.dataset.session)));
+      $$(".session-pin-button", list).forEach((button) => button.addEventListener("click", () => toggleSessionPin(button.dataset.session)));
+      $$(".session-archive-button", list).forEach((button) => button.addEventListener("click", () => toggleSessionArchive(button.dataset.session)));
+      $$(".session-rename-button", list).forEach((button) => button.addEventListener("click", () => renameSession(button.dataset.session)));
+    });
+  }
+
   function renderSessions() {
     const allSessions = state.sessions
       .filter((session) => session.directory === state.currentDirectory && !session.parentID)
       .sort((a, b) => Number(state.pinnedSessions.has(b.id)) - Number(state.pinnedSessions.has(a.id)) || (b.time?.updated || 0) - (a.time?.updated || 0));
     const archivedCount = allSessions.filter((session) => state.archivedSessions.has(session.id)).length;
-    const sessions = allSessions.filter((session) => state.showArchivedSessions || !state.archivedSessions.has(session.id));
+    const pinnedSessions = allSessions.filter((session) => state.pinnedSessions.has(session.id) && !state.archivedSessions.has(session.id));
+    const sessions = allSessions.filter((session) => !state.pinnedSessions.has(session.id) && (state.showArchivedSessions || !state.archivedSessions.has(session.id)));
+    els.pinnedSessionCount.textContent = String(pinnedSessions.length);
+    els.pinnedSessionList.innerHTML = pinnedSessions.length ? pinnedSessions.map(sessionRailItem).join("") : '<div class="empty-rail">Pin a session to keep it here.</div>';
     els.sessionCount.textContent = String(sessions.length);
     els.archivedSessionsButton.hidden = !archivedCount;
     els.archivedSessionsButton.setAttribute("aria-pressed", String(state.showArchivedSessions));
     els.archivedSessionsButton.setAttribute("aria-label", `${state.showArchivedSessions ? "Hide" : "Show"} ${archivedCount} archived session${archivedCount === 1 ? "" : "s"}`);
     els.archivedSessionsButton.title = `${state.showArchivedSessions ? "Hide" : "Show"} archived sessions`;
     els.archivedSessionsCount.textContent = String(archivedCount);
-    els.sessionList.innerHTML = sessions.length ? sessions.map((session) => {
-      const active = session.id === state.currentSessionID ? " active" : "";
-      const status = sessionStatus(session.id);
-      const title = session.title || "Untitled session";
-      const pinned = state.pinnedSessions.has(session.id);
-      const archived = state.archivedSessions.has(session.id);
-      return `<div class="session-item${active}${pinned ? " pinned" : ""}${archived ? " archived" : ""}"><button class="session-open-button" data-session="${escapeHTML(session.id)}" title="Open ${escapeHTML(title)}"><span class="session-copy"><strong>${escapeHTML(title)}</strong><small>${timeAgo(session.time?.updated)} · ${escapeHTML(session.model?.id || "agent")}</small></span><i class="session-dot ${status}"></i></button><button class="session-pin-button${pinned ? " active" : ""}" data-session="${escapeHTML(session.id)}" aria-label="${pinned ? "Unpin" : "Pin"} ${escapeHTML(title)}" title="${pinned ? "Unpin session" : "Pin session to top"}"${archived ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 8-3 1-4 6-1-6-3-3zM8 16l-4 4"/></svg></button><button class="session-archive-button" data-session="${escapeHTML(session.id)}" aria-label="${archived ? "Restore" : "Archive"} ${escapeHTML(title)}" title="${archived ? "Restore session" : "Archive session"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg></button><button class="session-rename-button" data-session="${escapeHTML(session.id)}" aria-label="Rename ${escapeHTML(title)}" title="Rename without opening"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button></div>`;
-    }).join("") : '<div class="empty-rail">No sessions in this project yet.</div>';
-    $$(".session-open-button", els.sessionList).forEach((button) => button.addEventListener("click", () => selectSession(button.dataset.session)));
-    $$(".session-pin-button", els.sessionList).forEach((button) => button.addEventListener("click", () => toggleSessionPin(button.dataset.session)));
-    $$(".session-archive-button", els.sessionList).forEach((button) => button.addEventListener("click", () => toggleSessionArchive(button.dataset.session)));
-    $$(".session-rename-button", els.sessionList).forEach((button) => button.addEventListener("click", () => renameSession(button.dataset.session)));
+    $("#settingsArchives").textContent = `${state.archivedSessions.size} archived`;
+    els.sessionList.innerHTML = sessions.length ? sessions.map(sessionRailItem).join("") : '<div class="empty-rail">No unpinned sessions in this project.</div>';
+    bindSessionRailActions();
     syncRailSections();
   }
 
@@ -2383,7 +2396,29 @@
     $("#settingsDeepSeek").textContent = (state.providers.connected || []).includes("deepseek") ? "Connected" : "Ready for key";
     setTalkState(state.voiceSpeaking ? "Speaking" : state.voiceAwaitingResponse ? "Thinking" : state.conversationMode ? "Listening" : "");
     renderActiveSkillCount();
+    $("#settingsArchives").textContent = `${state.archivedSessions.size} archived`;
     els.settingsDialog.showModal();
+  }
+
+  function renderArchiveManager() {
+    const archived = state.sessions
+      .filter((session) => state.archivedSessions.has(session.id) && !session.parentID)
+      .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0));
+    $("#settingsArchives").textContent = `${archived.length} archived`;
+    els.archiveManagerList.innerHTML = archived.length ? archived.map((session) => {
+      const title = session.title || "Untitled session";
+      return `<article class="archive-manager-item"><div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(basename(session.directory))} · ${timeAgo(session.time?.updated)}</span></div><button type="button" class="secondary-button" data-restore-session="${escapeHTML(session.id)}">Restore</button></article>`;
+    }).join("") : '<div class="archive-manager-empty"><strong>No archived sessions</strong><span>Sessions you archive will appear here.</span></div>';
+    $$('[data-restore-session]', els.archiveManagerList).forEach((button) => button.addEventListener("click", async () => {
+      await toggleSessionArchive(button.dataset.restoreSession);
+      renderArchiveManager();
+    }));
+  }
+
+  function openArchiveManager() {
+    if (els.settingsDialog.open) els.settingsDialog.close();
+    renderArchiveManager();
+    els.archiveDialog.showModal();
   }
 
   function openChatGPTSpace() {
@@ -2620,6 +2655,7 @@
     $("#newSessionButton").addEventListener("click", () => newSession());
     $("#addProjectButton").addEventListener("click", openProjectDialog);
     $("#projectsCollapseButton").addEventListener("click", () => toggleRailSection("projects"));
+    $("#pinnedSessionsCollapseButton").addEventListener("click", () => toggleRailSection("pinnedSessions"));
     $("#sessionsCollapseButton").addEventListener("click", () => toggleRailSection("sessions"));
     els.archivedSessionsButton.addEventListener("click", () => { state.showArchivedSessions = !state.showArchivedSessions; renderSessions(); });
     $("#pinnedMessagesCollapseButton").addEventListener("click", () => toggleRailSection("pins"));
@@ -2644,6 +2680,7 @@
     $("#settingsVoiceButton").addEventListener("click", toggleVoiceFromSettings);
     $("#settingsApprovalButton").addEventListener("click", openApprovalSettings);
     $("#settingsCommandsButton").addEventListener("click", () => { els.settingsDialog.close(); openCommands(); });
+    $("#settingsArchivesButton").addEventListener("click", openArchiveManager);
     $("#openApprovalButton").addEventListener("click", openApprovalSettings);
     $("#composerMinimizeButton").addEventListener("click", () => {
       const minimized = els.form.classList.toggle("minimized");
@@ -2756,7 +2793,7 @@
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommands(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newSession(); }
     });
-    [els.projectDialog, els.settingsDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.messageEditDialog, els.browserDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
+    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.messageEditDialog, els.browserDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
     els.instructionDialog.addEventListener("click", (event) => { if (event.target === els.instructionDialog) closeInstructionStudio(); });
     document.addEventListener("visibilitychange", syncMotionState);
     window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); });

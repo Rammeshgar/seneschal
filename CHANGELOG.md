@@ -4,7 +4,9 @@
 
 - Adds per-conversation message pinning with a compact pinned-message shelf
 - Adds persistent session pinning with pinned sessions sorted to the top
+- Adds a dedicated pinned-sessions sidebar section with its own count and minimize control
 - Adds reversible local session archiving with an archive counter and restore action
+- Adds an Archived sessions manager in Settings with one-click restore controls
 - Adds reversible local message archiving with a session archive counter
 - Adds independent minimize controls for Projects, Sessions, and pinned messages
 - Adds a visible Brave switch for the actual Playwright MCP browser

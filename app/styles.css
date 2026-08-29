@@ -138,7 +138,7 @@ html[data-theme="night"] .theme-track b { transform: translateX(22px); backgroun
 .rail-heading button:hover { background: var(--raised-2); color: var(--ink); }
 .rail-heading .rail-collapse-button svg { width: 13px; height: 13px; transition: transform .16s ease; }
 .rail-section.collapsed .rail-collapse-button svg { transform: rotate(-90deg); }
-.rail-section.collapsed .project-list, .rail-section.collapsed .session-list { display: none; }
+.rail-section.collapsed .project-list, .rail-section.collapsed .session-list, .rail-section.collapsed .pinned-session-list { display: none; }
 .rail-section.collapsed + .rail-section { margin-top: 4px; }
 .rail-heading small { min-width: 20px; text-align: center; padding: 3px 5px; border-radius: 4px; background: var(--recessed); color: var(--faint); }
 .project-list, .session-list { display: grid; gap: 3px; }
@@ -529,6 +529,17 @@ dialog::backdrop { background: rgba(7,9,8,.58); backdrop-filter: blur(5px); }
 .setting-card { display: grid; gap: 6px; padding: 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--recessed); }
 .setting-card span { color: var(--faint); font: 650 7px/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; }
 .setting-card strong { font-size: 11px; }.setting-card small { color: var(--muted); font-size: 8px; }
+.archive-setting { border-color: color-mix(in srgb, var(--clay) 32%, var(--line)); }
+.archive-manager-modal { width: min(620px, calc(100vw - 30px)); }
+.archive-manager-list { max-height: min(52vh, 430px); display: grid; gap: 7px; margin-top: 14px; overflow-y: auto; }
+.archive-manager-item { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--recessed); }
+.archive-manager-item > div { min-width: 0; display: grid; gap: 5px; }
+.archive-manager-item strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; }
+.archive-manager-item span { color: var(--faint); font: 600 7px/1 ui-monospace, monospace; }
+.archive-manager-item button { flex: none; min-width: 68px; }
+.archive-manager-empty { display: grid; gap: 6px; padding: 24px; border: 1px dashed var(--line); border-radius: 7px; color: var(--muted); text-align: center; }
+.archive-manager-empty strong { color: var(--ink); font-size: 11px; }
+.archive-manager-empty span { font-size: 9px; }
 .interactive-setting { width: 100%; color: var(--ink); text-align: left; cursor: pointer; border-color: color-mix(in srgb, var(--ochre) 30%, var(--line)); }
 .interactive-setting:hover { border-color: var(--ochre); background: color-mix(in srgb, var(--ochre) 6%, var(--recessed)); transform: translateY(-1px); }
 .interactive-setting { position: relative; padding-right: 34px; transition: border-color .16s ease, background .16s ease, transform .16s ease; }

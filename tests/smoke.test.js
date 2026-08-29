@@ -100,6 +100,10 @@ test("messages can be pinned, archived, restored, and independently collapsed", 
   assert.match(html, /archivedMessagesButton/);
   assert.match(html, /projectsCollapseButton/);
   assert.match(html, /sessionsCollapseButton/);
+  assert.match(html, /pinnedSessionsRailSection/);
+  assert.match(html, /pinnedSessionsCollapseButton/);
+  assert.match(html, /settingsArchivesButton/);
+  assert.match(html, /archivedSessionManagerList/);
   assert.match(app, /seneschal-pinned-messages/);
   assert.match(app, /seneschal-archived-messages/);
   assert.match(app, /seneschal-pinned-sessions/);
