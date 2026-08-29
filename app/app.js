@@ -24,8 +24,10 @@
     collapsedMessageIDs: new Set(),
     pinnedMessages: storage.get("seneschal-pinned-messages", {}),
     archivedMessages: storage.get("seneschal-archived-messages", {}),
+    deletedMessages: storage.get("seneschal-deleted-messages", {}),
     pinnedSessions: new Set(storage.get("seneschal-pinned-sessions", [])),
     archivedSessions: new Set(storage.get("seneschal-archived-sessions", [])),
+    excludedProjects: new Set(storage.get("seneschal-excluded-projects", [])),
     showArchivedSessions: false,
     showArchivedMessages: false,
     railSections: storage.get("seneschal-rail-sections", { projects: false, pinnedSessions: false, sessions: false, pins: false }),
@@ -34,6 +36,9 @@
     attachments: [],
     currentDirectory: storage.get("atelier-directory", ""),
     currentSessionID: storage.get("atelier-session", ""),
+    pendingDeleteSessionID: "",
+    pendingDeleteMessageID: "",
+    pendingDeleteProject: "",
     selectedModel: storage.get("atelier-model", ""),
     selectedAgent: storage.get("atelier-agent", "build"),
     selectedVariants: storage.get("atelier-model-variants", {}),
@@ -97,6 +102,8 @@
     settingsDialog: $("#settingsDialog"), archiveDialog: $("#archivedSessionsDialog"), archiveManagerList: $("#archivedSessionManagerList"), providerDialog: $("#providerDialog"), approvalDialog: $("#approvalDialog"), chatGPTDialog: $("#chatGPTDialog"), commandDialog: $("#commandDialog"), commandInput: $("#commandInput"),
     commandResults: $("#commandResults"), protocolDialog: $("#protocolDialog"), protocolLog: $("#protocolLog"),
     deleteDialog: $("#deleteSessionDialog"), deleteForm: $("#deleteSessionForm"), deleteTitle: $("#deleteSessionTitle"),
+    deleteMessageDialog: $("#deleteMessageDialog"), deleteMessageForm: $("#deleteMessageForm"), deleteMessageTitle: $("#deleteMessageTitle"),
+    deleteProjectDialog: $("#deleteProjectDialog"), deleteProjectForm: $("#deleteProjectForm"), deleteProjectTitle: $("#deleteProjectTitle"),
     messageEditDialog: $("#messageEditDialog"), messageEditForm: $("#messageEditForm"), messageEditInput: $("#messageEditInput"), messageEditAttachmentNote: $("#messageEditAttachmentNote"),
     toastRegion: $("#toastRegion"), inspector: $("#inspector"), browserState: $("#browserState"),
     browserCard: $("#browserCard"), browserDetail: $("#browserDetail"), browserDialog: $("#browserDialog"),
@@ -677,7 +684,7 @@
 
   function directories() {
     const list = [state.currentDirectory, state.path?.directory, ...state.customDirectories, ...state.sessions.map((s) => s.directory)].filter(Boolean);
-    return [...new Set(list)];
+    return [...new Set(list)].filter((directory) => !state.excludedProjects.has(directory));
   }
 
   function syncRailSections() {
@@ -707,10 +714,41 @@
     els.projectList.innerHTML = dirs.length ? dirs.map((dir) => {
       const count = state.sessions.filter((session) => session.directory === dir && !session.parentID).length;
       const active = dir === state.currentDirectory ? " active" : "";
-      return `<button class="project-item${active}" data-directory="${escapeHTML(dir)}" title="${escapeHTML(dir)}"><span class="project-glyph">${escapeHTML(basename(dir).slice(0,1).toUpperCase())}</span><span>${escapeHTML(basename(dir))}</span><small>${count}</small></button>`;
+      const title = basename(dir);
+      return `<div class="project-row${active}"><button class="project-item${active}" data-directory="${escapeHTML(dir)}" title="Open ${escapeHTML(dir)}"><span class="project-glyph">${escapeHTML(title.slice(0,1).toUpperCase())}</span><span>${escapeHTML(title)}</span><small>${count}</small></button><button class="project-delete-button" type="button" data-delete-project="${escapeHTML(dir)}" aria-label="Delete ${escapeHTML(title)} from Seneschal" title="Remove project from Seneschal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></div>`;
     }).join("") : '<div class="empty-rail">Add a project folder to begin.</div>';
     $$(".project-item", els.projectList).forEach((button) => button.addEventListener("click", () => switchDirectory(button.dataset.directory)));
+    $$('[data-delete-project]', els.projectList).forEach((button) => button.addEventListener("click", () => openDeleteProject(button.dataset.deleteProject)));
     syncRailSections();
+  }
+
+  function openDeleteProject(directory) {
+    if (!directory) return;
+    state.pendingDeleteProject = directory;
+    els.deleteProjectTitle.textContent = basename(directory);
+    els.deleteProjectDialog.showModal();
+  }
+
+  async function deleteProject() {
+    const directory = state.pendingDeleteProject;
+    if (!directory) return;
+    state.excludedProjects.add(directory);
+    state.customDirectories = state.customDirectories.filter((item) => item !== directory);
+    storage.set("seneschal-excluded-projects", [...state.excludedProjects]);
+    storage.set("atelier-projects", state.customDirectories);
+    state.pendingDeleteProject = "";
+    els.deleteProjectDialog.close();
+    if (state.currentDirectory === directory) {
+      const nextDirectory = directories()[0] || "";
+      state.currentDirectory = "";
+      state.currentSessionID = "";
+      state.messages = [];
+      storage.set("atelier-directory", "");
+      storage.set("atelier-session", "");
+      if (nextDirectory) await switchDirectory(nextDirectory);
+      else renderAll();
+    } else renderProjects();
+    toast(`${basename(directory)} removed from Seneschal. Its folder and sessions were not deleted.`);
   }
 
   function sessionStatus(sessionID) { return state.statuses[sessionID]?.type || "idle"; }
@@ -754,7 +792,7 @@
     const title = session.title || "Untitled session";
     const pinned = state.pinnedSessions.has(session.id);
     const archived = state.archivedSessions.has(session.id);
-    return `<div class="session-item${active}${pinned ? " pinned" : ""}${archived ? " archived" : ""}"><button class="session-open-button" data-session="${escapeHTML(session.id)}" title="Open ${escapeHTML(title)}"><span class="session-copy"><strong>${escapeHTML(title)}</strong><small>${timeAgo(session.time?.updated)} · ${escapeHTML(session.model?.id || "agent")}</small></span><i class="session-dot ${status}"></i></button><button class="session-pin-button${pinned ? " active" : ""}" data-session="${escapeHTML(session.id)}" aria-label="${pinned ? "Unpin" : "Pin"} ${escapeHTML(title)}" title="${pinned ? "Unpin session" : "Pin session to top"}"${archived ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 8-3 1-4 6-1-6-3-3zM8 16l-4 4"/></svg></button><button class="session-archive-button" data-session="${escapeHTML(session.id)}" aria-label="${archived ? "Restore" : "Archive"} ${escapeHTML(title)}" title="${archived ? "Restore session" : "Archive session"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg></button><button class="session-rename-button" data-session="${escapeHTML(session.id)}" aria-label="Rename ${escapeHTML(title)}" title="Rename without opening"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button></div>`;
+    return `<div class="session-item${active}${pinned ? " pinned" : ""}${archived ? " archived" : ""}"><button class="session-open-button" data-session="${escapeHTML(session.id)}" title="Open ${escapeHTML(title)}"><span class="session-copy"><strong>${escapeHTML(title)}</strong><small>${timeAgo(session.time?.updated)} · ${escapeHTML(session.model?.id || "agent")}</small></span><i class="session-dot ${status}"></i></button><button class="session-pin-button${pinned ? " active" : ""}" data-session="${escapeHTML(session.id)}" aria-label="${pinned ? "Unpin" : "Pin"} ${escapeHTML(title)}" title="${pinned ? "Unpin session" : "Pin session to top"}"${archived ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 8-3 1-4 6-1-6-3-3zM8 16l-4 4"/></svg></button><button class="session-archive-button" data-session="${escapeHTML(session.id)}" aria-label="${archived ? "Restore" : "Archive"} ${escapeHTML(title)}" title="${archived ? "Restore session" : "Archive session"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg></button><button class="session-rename-button" data-session="${escapeHTML(session.id)}" aria-label="Rename ${escapeHTML(title)}" title="Rename without opening"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button><button class="session-delete-button" data-session="${escapeHTML(session.id)}" aria-label="Delete ${escapeHTML(title)}" title="Delete session permanently"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></div>`;
   }
 
   function bindSessionRailActions() {
@@ -763,6 +801,7 @@
       $$(".session-pin-button", list).forEach((button) => button.addEventListener("click", () => toggleSessionPin(button.dataset.session)));
       $$(".session-archive-button", list).forEach((button) => button.addEventListener("click", () => toggleSessionArchive(button.dataset.session)));
       $$(".session-rename-button", list).forEach((button) => button.addEventListener("click", () => renameSession(button.dataset.session)));
+      $$(".session-delete-button", list).forEach((button) => button.addEventListener("click", () => openDeleteSession(button.dataset.session)));
     });
   }
 
@@ -983,7 +1022,7 @@
     state.browserRuntime.restarting = true;
     renderBrowser();
     try {
-      state.browserRuntime = await workspace("/workspace/browser-mode", { method: "POST", body: { visible } });
+      state.browserRuntime = await workspace("/workspace/browser-mode", { method: "POST", body: { visible, directory: state.currentDirectory } });
       renderBrowser();
       toast(visible
         ? "Visible Brave enabled. The agent-controlled window will appear on its next browser action."
@@ -1440,6 +1479,35 @@
     toast(active ? "Message archived locally. Use the archive counter to restore it." : "Message restored.");
   }
 
+  function openDeleteMessage(messageID) {
+    const message = state.messages.find((item) => item.info?.id === messageID);
+    if (!message) return;
+    state.pendingDeleteMessageID = messageID;
+    const role = message.info?.role === "user" ? "Your message" : "Seneschal response";
+    els.deleteMessageTitle.textContent = `${role}: ${messagePreview(message, 0)}`;
+    els.deleteMessageDialog.showModal();
+  }
+
+  function deleteMessage() {
+    const messageID = state.pendingDeleteMessageID;
+    if (!messageID || !state.currentSessionID) return;
+    const deleted = storedMessageIDs(state.deletedMessages);
+    const pinned = storedMessageIDs(state.pinnedMessages);
+    const archived = storedMessageIDs(state.archivedMessages);
+    deleted.add(messageID);
+    pinned.delete(messageID);
+    archived.delete(messageID);
+    saveMessageIDs(state.deletedMessages, "seneschal-deleted-messages", deleted);
+    saveMessageIDs(state.pinnedMessages, "seneschal-pinned-messages", pinned);
+    saveMessageIDs(state.archivedMessages, "seneschal-archived-messages", archived);
+    state.collapsedMessageIDs.delete(messageID);
+    if (state.maximizedMessageID === messageID) state.maximizedMessageID = "";
+    state.pendingDeleteMessageID = "";
+    els.deleteMessageDialog.close();
+    renderMessages();
+    toast("Message deleted from this Seneschal view. OpenCode source data is unchanged.");
+  }
+
   function locateMessage(messageID) {
     const archived = storedMessageIDs(state.archivedMessages);
     if (archived.has(messageID) && !state.showArchivedMessages) {
@@ -1456,8 +1524,8 @@
     });
   }
 
-  function renderPinnedMessages(pinned, archived) {
-    const messages = state.messages.filter((message) => pinned.has(message.info?.id) && !archived.has(message.info?.id));
+  function renderPinnedMessages(pinned, archived, deleted) {
+    const messages = state.messages.filter((message) => pinned.has(message.info?.id) && !archived.has(message.info?.id) && !deleted.has(message.info?.id));
     els.pinnedShelf.hidden = !messages.length;
     els.pinnedCount.textContent = String(messages.length);
     els.pinnedList.innerHTML = messages.map((message, index) => {
@@ -1484,7 +1552,8 @@
     }
     const pinned = storedMessageIDs(state.pinnedMessages, session.id);
     const archived = storedMessageIDs(state.archivedMessages, session.id);
-    const visibleMessages = state.messages.filter((message) => state.showArchivedMessages || !archived.has(message.info?.id));
+    const deleted = storedMessageIDs(state.deletedMessages, session.id);
+    const visibleMessages = state.messages.filter((message) => !deleted.has(message.info?.id) && (state.showArchivedMessages || !archived.has(message.info?.id)));
     if (state.maximizedMessageID && !state.messages.some((message) => message.info?.id === state.maximizedMessageID)) state.maximizedMessageID = "";
     $("#appShell").classList.toggle("message-maximized", Boolean(state.maximizedMessageID));
     els.archivedMessagesButton.hidden = !archived.size;
@@ -1492,7 +1561,7 @@
     els.archivedMessagesButton.setAttribute("aria-label", `${state.showArchivedMessages ? "Hide" : "Show"} ${archived.size} archived message${archived.size === 1 ? "" : "s"}`);
     els.archivedMessagesButton.setAttribute("title", `${state.showArchivedMessages ? "Hide" : "Show"} archived messages`);
     els.archivedMessagesCount.textContent = String(archived.size);
-    renderPinnedMessages(pinned, archived);
+    renderPinnedMessages(pinned, archived, deleted);
     const rows = visibleMessages.map((message) => {
       const info = message.info || {};
       const role = info.role === "user" ? "user" : "assistant";
@@ -1505,7 +1574,7 @@
       const userActions = role === "user" ? '<button type="button" class="message-edit-button" aria-label="Edit this message" title="Edit and retry this message">Edit</button><button type="button" class="message-retry-button" aria-label="Retry this message" title="Retry from this point">Retry</button>' : "";
       const isPinned = pinned.has(info.id);
       const isArchived = archived.has(info.id);
-      const controls = `<span class="message-view-controls">${userActions}<button type="button" class="message-pin-button${isPinned ? " active" : ""}" aria-label="${isPinned ? "Unpin" : "Pin"} this message" title="${isPinned ? "Unpin" : "Pin"} this message">${isPinned ? "Unpin" : "Pin"}</button><button type="button" class="message-archive-button" aria-label="${isArchived ? "Restore" : "Archive"} this message" title="${isArchived ? "Restore" : "Archive"} this message locally">${isArchived ? "Restore" : "Archive"}</button><button type="button" class="message-size-button" aria-label="Minimize ${kind}" title="Minimize or expand ${kind}">Minimize</button><button type="button" class="message-maximize-button" aria-label="Maximize ${kind}" title="Maximize ${kind}">Maximize</button><button type="button" class="message-copy-button" aria-label="Copy ${kind}" title="Copy ${kind}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span></button></span>`;
+      const controls = `<span class="message-view-controls">${userActions}<button type="button" class="message-pin-button${isPinned ? " active" : ""}" aria-label="${isPinned ? "Unpin" : "Pin"} this message" title="${isPinned ? "Unpin" : "Pin"} this message">${isPinned ? "Unpin" : "Pin"}</button><button type="button" class="message-archive-button" aria-label="${isArchived ? "Restore" : "Archive"} this message" title="${isArchived ? "Restore" : "Archive"} this message locally">${isArchived ? "Restore" : "Archive"}</button><button type="button" class="message-delete-button" aria-label="Delete this message" title="Delete from this Seneschal view">Delete</button><button type="button" class="message-size-button" aria-label="Minimize ${kind}" title="Minimize or expand ${kind}">Minimize</button><button type="button" class="message-maximize-button" aria-label="Maximize ${kind}" title="Maximize ${kind}">Maximize</button><button type="button" class="message-copy-button" aria-label="Copy ${kind}" title="Copy ${kind}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span></button></span>`;
       const collapsed = state.collapsedMessageIDs.has(info.id) ? " collapsed" : "";
       const maximized = state.maximizedMessageID === info.id ? " maximized" : "";
       return `<article class="message ${role}${isPinned ? " pinned" : ""}${isArchived ? " archived" : ""}${collapsed}${maximized}" data-message="${escapeHTML(info.id || "")}"><div class="message-avatar">${avatar}</div><div class="message-body"><div class="message-meta"><strong>${escapeHTML(label)}</strong><span>${info.time?.created ? new Date(info.time.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>${controls}</div><div class="message-content">${parts}</div></div></article>`;
@@ -1519,6 +1588,7 @@
     $$(".message-edit-button", els.messageList).forEach((button) => button.addEventListener("click", () => openMessageEditor(button.closest(".message")?.dataset.message)));
     $$(".message-pin-button", els.messageList).forEach((button) => button.addEventListener("click", () => toggleMessagePin(button.closest(".message")?.dataset.message)));
     $$(".message-archive-button", els.messageList).forEach((button) => button.addEventListener("click", () => toggleMessageArchive(button.closest(".message")?.dataset.message)));
+    $$(".message-delete-button", els.messageList).forEach((button) => button.addEventListener("click", () => openDeleteMessage(button.closest(".message")?.dataset.message)));
     $$(".message-size-button", els.messageList).forEach((button) => {
       const message = button.closest(".message");
       const id = message.dataset.message;
@@ -1948,17 +2018,19 @@
     } catch (error) { toast(`Could not stop the session: ${error.message}`, "error"); }
   }
 
-  function openDeleteSession() {
-    const session = selectedSession();
+  function openDeleteSession(sessionID = state.currentSessionID) {
+    const session = state.sessions.find((item) => item.id === sessionID);
     if (!session) return;
+    state.pendingDeleteSessionID = session.id;
     els.deleteTitle.textContent = session.title || "Untitled conversation";
     els.deleteDialog.showModal();
   }
 
   async function deleteSession() {
-    const session = selectedSession();
+    const session = state.sessions.find((item) => item.id === state.pendingDeleteSessionID);
     if (!session) return;
     const deletedID = session.id;
+    const wasCurrent = state.currentSessionID === deletedID;
     try {
       if (["busy", "retry"].includes(sessionStatus(deletedID))) {
         await api(`/session/${encodeURIComponent(deletedID)}/abort`, { directory: session.directory, method: "POST" }).catch(() => null);
@@ -1972,13 +2044,22 @@
       storage.set("seneschal-archived-sessions", [...state.archivedSessions]);
       delete state.pinnedMessages[deletedID];
       delete state.archivedMessages[deletedID];
+      delete state.deletedMessages[deletedID];
       storage.set("seneschal-pinned-messages", state.pinnedMessages);
       storage.set("seneschal-archived-messages", state.archivedMessages);
-      state.currentSessionID = "";
-      state.messages = [];
-      storage.set("atelier-session", "");
+      storage.set("seneschal-deleted-messages", state.deletedMessages);
+      state.pendingDeleteSessionID = "";
+      if (wasCurrent) {
+        const next = state.sessions
+          .filter((item) => item.directory === session.directory && !item.parentID && !state.archivedSessions.has(item.id))
+          .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0];
+        state.currentSessionID = next?.id || "";
+        state.messages = [];
+        storage.set("atelier-session", state.currentSessionID);
+      }
       els.deleteDialog.close();
       renderAll();
+      if (wasCurrent && state.currentSessionID) await refreshMessages(true);
       toast("Conversation deleted.");
     } catch (error) { toast(`Could not delete the conversation: ${error.message}`, "error"); }
   }
@@ -2381,7 +2462,9 @@
     try {
       await api("/path", { directory });
       if (!state.customDirectories.includes(directory)) state.customDirectories.push(directory);
+      state.excludedProjects.delete(directory);
       storage.set("atelier-projects", state.customDirectories);
+      storage.set("seneschal-excluded-projects", [...state.excludedProjects]);
       els.projectDialog.close();
       await switchDirectory(directory);
       toast(`Added ${basename(directory)}.`);
@@ -2457,6 +2540,13 @@
     try {
       const url = normalizeBrowserUrl(els.browserUrl.value);
       const task = els.browserTask.value.trim() || "Inspect the page and report what you find.";
+      if (!state.browserRuntime?.available) throw new Error("Visible browser control needs one Seneschal restart before this task can run. Close Seneschal, open it again, then retry.");
+      if (!state.browserRuntime.visible) {
+        state.browserRuntime.restarting = true;
+        renderBrowser();
+        state.browserRuntime = await workspace("/workspace/browser-mode", { method: "POST", body: { visible: true, directory: state.currentDirectory } });
+        renderBrowser();
+      }
       els.browserError.hidden = true;
       els.browserDialog.close();
       await sendPrompt(`Use the Playwright browser tools to open ${url}\n\nTask: ${task}\n\nUse browser interaction tools, not only web search or webfetch. Report the result clearly and include a browser screenshot when it is useful.`);
@@ -2629,8 +2719,8 @@
       ]);
       state.health = health; state.path = path; state.sessions = sessions; state.providers = providers;
       els.version.textContent = health.version || "—";
-      if (!state.currentDirectory) state.currentDirectory = sessions[0]?.directory || path.directory;
-      if (!directories().includes(state.currentDirectory)) state.currentDirectory = sessions[0]?.directory || path.directory;
+      const availableDirectories = directories();
+      if (!state.currentDirectory || !availableDirectories.includes(state.currentDirectory)) state.currentDirectory = availableDirectories[0] || "";
       const currentExists = sessions.some((session) => session.id === state.currentSessionID && session.directory === state.currentDirectory);
       if (!currentExists) state.currentSessionID = sessions.filter((session) => session.directory === state.currentDirectory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0]?.id || "";
       storage.set("atelier-directory", state.currentDirectory); storage.set("atelier-session", state.currentSessionID);
@@ -2754,9 +2844,11 @@
     $$(".quick-card").forEach((button) => button.addEventListener("click", () => { els.prompt.value = button.dataset.prompt; autoSizePrompt(); els.prompt.focus(); }));
     els.abortButton.addEventListener("click", abortSession);
     els.composerStop.addEventListener("click", abortSession);
-    els.deleteSessionButton.addEventListener("click", openDeleteSession);
+    els.deleteSessionButton.addEventListener("click", () => openDeleteSession());
     $("#exportSessionButton").addEventListener("click", exportSession);
     els.deleteForm.addEventListener("submit", (event) => { if (event.submitter?.id === "confirmDeleteSessionButton") { event.preventDefault(); deleteSession(); } });
+    els.deleteMessageForm.addEventListener("submit", (event) => { if (event.submitter?.id === "confirmDeleteMessageButton") { event.preventDefault(); deleteMessage(); } });
+    els.deleteProjectForm.addEventListener("submit", (event) => { if (event.submitter?.id === "confirmDeleteProjectButton") { event.preventDefault(); deleteProject(); } });
     els.messageEditForm.addEventListener("submit", submitMessageEdit);
     $("#cancelMessageEditButton").addEventListener("click", () => els.messageEditDialog.close());
     $("#renameSessionButton").addEventListener("click", renameSession);
@@ -2793,7 +2885,7 @@
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommands(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newSession(); }
     });
-    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.messageEditDialog, els.browserDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
+    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, els.messageEditDialog, els.browserDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
     els.instructionDialog.addEventListener("click", (event) => { if (event.target === els.instructionDialog) closeInstructionStudio(); });
     document.addEventListener("visibilitychange", syncMotionState);
     window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); });

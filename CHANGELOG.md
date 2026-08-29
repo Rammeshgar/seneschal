@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1-beta.9 — 2026-08-29
+
+- Adds confirmed Delete controls to normal, pinned, and archived session rows
+- Adds confirmed local message deletion while accurately preserving OpenCode source transcripts
+- Adds safe project removal from Seneschal without deleting project folders, files, or sessions
+- Makes Browser tasks enable visible Brave before the prompt is sent instead of silently running headlessly
+- Blocks a Browser task with a clear restart instruction when the visible bridge backend is stale
+
 ## 0.2.1-beta.8 — 2026-08-29
 
 - Adds per-conversation message pinning with a compact pinned-message shelf

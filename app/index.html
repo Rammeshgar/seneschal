@@ -421,6 +421,24 @@
       </form>
     </dialog>
 
+    <dialog class="modal danger-modal" id="deleteMessageDialog">
+      <form method="dialog" id="deleteMessageForm">
+        <div class="modal-kicker">DELETE MESSAGE</div>
+        <h2>Delete this message?</h2>
+        <p><strong id="deleteMessageTitle">This message</strong> will disappear permanently from Seneschal on this device. OpenCode does not provide safe single-message deletion, so its source transcript remains unchanged.</p>
+        <div class="modal-actions"><button value="cancel" class="secondary-button">Keep message</button><button value="default" class="danger-action" id="confirmDeleteMessageButton">Delete from Seneschal</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal danger-modal" id="deleteProjectDialog">
+      <form method="dialog" id="deleteProjectForm">
+        <div class="modal-kicker">REMOVE PROJECT</div>
+        <h2>Remove this project?</h2>
+        <p><strong id="deleteProjectTitle">This project</strong> will be removed from Seneschal’s sidebar. Its folder, files, and OpenCode sessions will not be deleted.</p>
+        <div class="modal-actions"><button value="cancel" class="secondary-button">Keep project</button><button value="default" class="danger-action" id="confirmDeleteProjectButton">Remove project</button></div>
+      </form>
+    </dialog>
+
     <dialog class="modal message-edit-modal" id="messageEditDialog">
       <form id="messageEditForm">
         <div class="modal-kicker">EDIT MESSAGE</div>

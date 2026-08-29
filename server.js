@@ -612,18 +612,26 @@ function browserRuntimeInfo() {
   return { available: Boolean(launcher), visible: fs.existsSync(flag), launcher, flag };
 }
 
-function restartPlaywrightBridge(launcher, callback) {
-  const literal = String(launcher).replace(/'/g, "''");
-  const script = [
-    `$target = '${literal}'`,
-    "$matches = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($target, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 })",
-    "foreach ($item in $matches) { & taskkill.exe /PID $item.ProcessId /T /F | Out-Null }",
-    "[Console]::Out.Write($matches.Count)"
-  ].join("; ");
-  runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], (error, stdout = "") => {
-    if (error) return callback(error);
-    callback(null, Number(String(stdout).trim()) || 0);
+function restartPlaywrightBridge(directory, callback) {
+  const query = new URLSearchParams({ directory: directory || launchDirectory }).toString();
+  const request = http.request({
+    hostname: host,
+    port: upstreamPort,
+    path: `/instance/dispose?${query}`,
+    method: "POST",
+    timeout: 4000,
+    headers: { authorization: upstreamAuthorization, accept: "application/json" }
+  }, (response) => {
+    let payload = "";
+    response.on("data", (chunk) => { payload += chunk; });
+    response.on("end", () => {
+      if (response.statusCode >= 200 && response.statusCode < 300) return callback(null, true);
+      callback(new Error(payload || `OpenCode could not restart the browser bridge (${response.statusCode}).`));
+    });
   });
+  request.once("timeout", () => request.destroy(new Error("OpenCode took too long to restart the browser bridge.")));
+  request.once("error", callback);
+  request.end();
 }
 
 function handleWorkspaceEndpoint(request, response, pathname) {
@@ -742,7 +750,7 @@ function handleWorkspaceEndpoint(request, response, pathname) {
         fs.mkdirSync(path.dirname(runtime.flag), { recursive: true });
         if (body.visible) fs.writeFileSync(runtime.flag, "visible\n", "utf8");
         else if (fs.existsSync(runtime.flag)) fs.unlinkSync(runtime.flag);
-        restartPlaywrightBridge(runtime.launcher, (restartError, restarted = 0) => {
+        restartPlaywrightBridge(body.directory || launchDirectory, (restartError, restarted = false) => {
           if (restartError) return endpointError(response, restartError);
           return json(response, 200, { available: true, visible: body.visible, restarting: false, restarted, takesEffect: "next-browser-action" });
         });

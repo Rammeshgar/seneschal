@@ -112,6 +112,14 @@ test("messages can be pinned, archived, restored, and independently collapsed", 
   assert.match(app, /toggleSessionArchive/);
   assert.match(app, /toggleMessagePin/);
   assert.match(app, /toggleMessageArchive/);
+  assert.match(html, /deleteMessageDialog/);
+  assert.match(html, /deleteProjectDialog/);
+  assert.match(app, /seneschal-deleted-messages/);
+  assert.match(app, /seneschal-excluded-projects/);
+  assert.match(app, /session-delete-button/);
+  assert.match(app, /message-delete-button/);
+  assert.match(app, /project-delete-button/);
+  assert.match(app, /OpenCode source data is unchanged/);
   assert.match(app, /toggleRailSection\("pins"\)/);
 });
 
@@ -124,8 +132,11 @@ test("Playwright Brave can switch between hidden and visible agent-controlled mo
   assert.match(launcher, /%DISPLAY_MODE% --isolated/);
   assert.match(server, /\/workspace\/browser-mode/);
   assert.match(server, /restartPlaywrightBridge/);
-  assert.match(server, /IndexOf\(\$target/);
+  assert.match(server, /\/instance\/dispose/);
+  assert.match(server, /body\.directory \|\| launchDirectory/);
   assert.match(app, /toggleBrowserWindow/);
+  assert.match(app, /body: \{ visible: true, directory: state\.currentDirectory \}/);
+  assert.match(app, /Visible browser control needs one Seneschal restart/);
 });
 
 test("hidden launcher leaves a useful failure report", () => {
