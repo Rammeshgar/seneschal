@@ -40,6 +40,7 @@ const generalInstructionsFile = path.win32.join(openCodeConfigDirectory, "GENERA
 const instructionDataDirectory = path.join(dataDirectory, "instructions");
 const instructionBackupDirectory = path.join(dataDirectory, "instruction-backups");
 const instructionJournalFile = path.join(instructionBackupDirectory, "journal.json");
+const agentBoardFile = path.join(dataDirectory, "agent-board.json");
 const maximumInstructionBytes = 256 * 1024;
 
 fs.mkdirSync(instructionDataDirectory, { recursive: true });
@@ -160,9 +161,11 @@ function isAuthorized(request) {
 function authorizeFromQuery(request, response) {
   const url = new URL(request.url, `http://${request.headers.host || `${host}:${publicPort}`}`);
   if (!sameSecret(url.searchParams.get("access"), workspaceToken)) return false;
+  url.searchParams.delete("access");
+  const redirectLocation = `${url.pathname || "/"}${url.search}`;
   response.writeHead(302, {
     ...securityHeaders,
-    location: url.pathname || "/",
+    location: redirectLocation,
     "set-cookie": `atelier_session=${workspaceToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`
   });
   response.end();
@@ -589,6 +592,74 @@ function runCommand(command, args, callback, options = {}) {
   child.on("close", (code) => callback(code === 0 ? null : new Error(stderr || `${command} exited with ${code}`), stdout));
 }
 
+function readAgentBoard() {
+  try {
+    const board = JSON.parse(fs.readFileSync(agentBoardFile, "utf8"));
+    return board && typeof board === "object" ? board : {};
+  } catch { return {}; }
+}
+
+function writeAgentBoard(board) {
+  const safe = board && typeof board === "object" ? board : {};
+  const encoded = JSON.stringify(safe, null, 2);
+  if (Buffer.byteLength(encoded, "utf8") > 1024 * 1024) throw new Error("The Agent Board is too large to save.");
+  const temporary = `${agentBoardFile}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${encoded}\n`, "utf8");
+  fs.copyFileSync(temporary, agentBoardFile);
+  fs.unlinkSync(temporary);
+  return safe;
+}
+
+function findVsCodeExecutable() {
+  const candidates = [
+    process.env.SENESCHAL_VSCODE,
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "Microsoft VS Code", "Code.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Microsoft VS Code", "Code.exe")
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+}
+
+function vsCodeRuntimeInfo() {
+  const executable = findVsCodeExecutable();
+  const companion = path.join(installDirectory, "extensions", "seneschal-vscode", "seneschal-vscode.vsix");
+  return { available: Boolean(executable), executable, remote: `wsl+${wslDistribution}`, companion, companionAvailable: fs.existsSync(companion) };
+}
+
+function installVsCodeCompanion() {
+  const runtime = vsCodeRuntimeInfo();
+  if (!runtime.available) throw new Error("Visual Studio Code was not found.");
+  if (!runtime.companionAvailable) throw new Error("The Seneschal VS Code companion package is missing from this installation.");
+  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  const connectionDirectory = path.join(localAppData, "Seneschal");
+  const connectionFile = path.join(connectionDirectory, "vscode-connection.json");
+  fs.mkdirSync(connectionDirectory, { recursive: true });
+  fs.writeFileSync(connectionFile, `${JSON.stringify({ baseUrl: `http://${host}:${publicPort}`, token: workspaceToken }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  const child = spawn(runtime.executable, ["--install-extension", runtime.companion, "--force"], { detached: true, stdio: "ignore", windowsHide: true });
+  child.unref();
+  return { installing: true, connectionFile };
+}
+
+function openInVsCode(body = {}) {
+  const runtime = vsCodeRuntimeInfo();
+  if (!runtime.available) throw new Error("Visual Studio Code was not found. Install it or set SENESCHAL_VSCODE to Code.exe.");
+  const directory = String(body.directory || launchDirectory).trim();
+  const resource = String(body.resource || "").trim();
+  const line = Math.max(1, Number.parseInt(body.line, 10) || 1);
+  const column = Math.max(1, Number.parseInt(body.column, 10) || 1);
+  const target = resource || directory;
+  if (!target || /[\r\n\0]/.test(target)) throw new Error("Choose a valid project or file path.");
+  const args = [];
+  const isWslPath = /^\//.test(target);
+  if (isWslPath) args.push("--remote", runtime.remote);
+  if (body.newWindow !== false) args.push("--new-window");
+  if (resource) args.push("--goto", `${target}:${line}:${column}`);
+  else args.push(target);
+  const child = spawn(runtime.executable, args, { detached: true, stdio: "ignore", windowsHide: false });
+  child.unref();
+  return { opening: true, target, remote: isWslPath ? runtime.remote : "local" };
+}
+
 function usageEstimate(callback) {
   runCommand("wsl.exe", ["-d", wslDistribution, "--", "bash", "-ic", "opencode stats --days 30"], (error, stdout = "") => {
     if (error) return callback({ budget: 10, cost: null, percent: null, note: "Usage estimate is temporarily unavailable." });
@@ -617,7 +688,21 @@ function browserRuntimeInfo() {
   const launcher = launchers.find((candidate) => fs.existsSync(candidate) && fs.existsSync(path.join(path.dirname(candidate), "node_modules", ".bin", "playwright-mcp.cmd"))) || "";
   const runtimeRoot = launcher ? path.dirname(path.dirname(launcher)) : installDirectory;
   const flag = path.join(runtimeRoot, "data", "playwright-visible.flag");
-  return { available: Boolean(launcher), visible: fs.existsSync(flag), launcher, flag };
+  let visibilityAware = false;
+  try { visibilityAware = /playwright-visible\.flag/i.test(fs.readFileSync(launcher, "utf8")); } catch {}
+  return { available: Boolean(launcher), visible: fs.existsSync(flag), launcher, flag, visibilityAware };
+}
+
+function ensureVisibilityAwareBrowserLauncher(runtime) {
+  if (!runtime?.launcher || runtime.visibilityAware) return runtime;
+  const currentLauncher = path.join(installDirectory, "scripts", "start-playwright-mcp.cmd");
+  if (!fs.existsSync(currentLauncher)) throw new Error("The current visibility-aware Playwright launcher is missing. Reinstall Seneschal.");
+  const source = fs.readFileSync(currentLauncher, "utf8");
+  if (!/playwright-visible\.flag/i.test(source)) throw new Error("The bundled Playwright launcher does not support visible mode.");
+  const backup = `${runtime.launcher}.legacy-headless-backup`;
+  if (!fs.existsSync(backup)) fs.copyFileSync(runtime.launcher, backup);
+  fs.copyFileSync(currentLauncher, runtime.launcher);
+  return browserRuntimeInfo();
 }
 
 function restartPlaywrightBridge(directory, callback) {
@@ -750,23 +835,51 @@ function handleWorkspaceEndpoint(request, response, pathname) {
     blenderHealth((status) => json(response, 200, status));
     return true;
   }
+  if (pathname === "/workspace/agent-board" && request.method === "GET") {
+    return json(response, 200, readAgentBoard());
+  }
+  if (pathname === "/workspace/agent-board" && request.method === "POST") {
+    readJsonBody(request, (error, body) => {
+      if (error) return endpointError(response, error);
+      try { return json(response, 200, writeAgentBoard(body)); }
+      catch (saveError) { return endpointError(response, saveError); }
+    });
+    return true;
+  }
+  if (pathname === "/workspace/vscode" && request.method === "GET") {
+    const runtime = vsCodeRuntimeInfo();
+    return json(response, 200, { available: runtime.available, remote: runtime.remote, companionAvailable: runtime.companionAvailable });
+  }
+  if (pathname === "/workspace/vscode/open" && request.method === "POST") {
+    readJsonBody(request, (error, body) => {
+      if (error) return endpointError(response, error);
+      try { return json(response, 202, openInVsCode(body)); }
+      catch (openError) { return endpointError(response, openError); }
+    });
+    return true;
+  }
+  if (pathname === "/workspace/vscode/install-companion" && request.method === "POST") {
+    try { return json(response, 202, installVsCodeCompanion()); }
+    catch (installError) { return endpointError(response, installError); }
+  }
   if (pathname === "/workspace/browser-mode" && request.method === "GET") {
     const runtime = browserRuntimeInfo();
-    return json(response, 200, { available: runtime.available, visible: runtime.visible, restarting: false });
+    return json(response, 200, { available: runtime.available, visible: runtime.visible, visibilityAware: runtime.visibilityAware, repairing: runtime.available && !runtime.visibilityAware, restarting: false });
   }
   if (pathname === "/workspace/browser-mode" && request.method === "POST") {
     readJsonBody(request, (error, body) => {
       if (error) return endpointError(response, error);
       try {
-        const runtime = browserRuntimeInfo();
+        let runtime = browserRuntimeInfo();
         if (!runtime.available) return json(response, 404, { error: "The Playwright Brave bridge is not installed yet. Run the Seneschal installer first." });
         if (typeof body.visible !== "boolean") throw new Error("Browser visibility must be true or false.");
+        runtime = ensureVisibilityAwareBrowserLauncher(runtime);
         fs.mkdirSync(path.dirname(runtime.flag), { recursive: true });
         if (body.visible) fs.writeFileSync(runtime.flag, "visible\n", "utf8");
         else if (fs.existsSync(runtime.flag)) fs.unlinkSync(runtime.flag);
         restartPlaywrightBridge(body.directory || launchDirectory, (restartError, restarted = false) => {
           if (restartError) return endpointError(response, restartError);
-          return json(response, 200, { available: true, visible: body.visible, restarting: false, restarted, takesEffect: "next-browser-action" });
+          return json(response, 200, { available: true, visible: body.visible, visibilityAware: true, repairing: false, restarting: false, restarted, takesEffect: "next-browser-action" });
         });
       } catch (modeError) { return endpointError(response, modeError); }
     });

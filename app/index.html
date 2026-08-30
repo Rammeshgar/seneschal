@@ -39,6 +39,9 @@
         </button>
 
         <div class="top-actions">
+          <button class="icon-button board-launch-button" id="agentBoardButton" title="Open Agent Board" aria-label="Open Agent Board">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="15" width="7" height="6" rx="1"/><path d="M6.5 10v2.5H12V15m5.5-5v2.5H12"/></svg>
+          </button>
           <button class="icon-button panel-toggle" id="leftPanelToggle" title="Minimize left panel" aria-label="Minimize left projects and sessions panel" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M6.5 9.5 4 12l2.5 2.5"/></svg>
           </button>
@@ -90,6 +93,7 @@
         </div>
 
         <div class="sidebar-footer">
+          <button class="rail-link agent-board-rail-link" id="agentBoardRailButton"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="15" width="7" height="6" rx="1"/><path d="M6.5 10v2.5H12V15m5.5-5v2.5H12"/></svg><span>Agent Board</span><small id="agentBoardRailCount">0</small></button>
           <button class="rail-link" id="instructionsRailButton"><svg viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/></svg>Instructions</button>
           <button class="rail-link chatgpt-rail-link" id="chatGPTRailButton"><span class="chatgpt-mini-mark" aria-hidden="true">C</span><span>ChatGPT Chat</span><small>CHAT</small></button>
           <div class="usage-card">
@@ -111,6 +115,8 @@
               <span class="status-chip" id="sessionStatus"><i></i><span>Idle</span></span>
               <button class="icon-button" id="renameSessionButton" title="Rename session"><svg viewBox="0 0 24 24"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button>
               <button class="icon-button" id="exportSessionButton" title="Export conversation" aria-label="Export conversation"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button>
+              <button class="icon-button" id="sendSessionToBoardButton" title="Send this session to Agent Board" aria-label="Send current session to Agent Board"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="15" width="7" height="6" rx="1"/><path d="M6.5 10v2.5H12V15m5.5-5v2.5H12"/></svg></button>
+              <button class="icon-button" id="openSessionVsCodeButton" title="Open project in VS Code" aria-label="Open current project in Visual Studio Code"><svg viewBox="0 0 24 24"><path d="m17 3 4 2v14l-4 2-9-7-4 3-2-1V8l2-1 4 3 9-7Z"/><path d="m8 10 9-5v14l-9-5Z"/></svg></button>
               <button class="session-archive-toggle" id="archivedMessagesButton" type="button" title="Show archived messages" aria-label="Show archived messages" aria-pressed="false" hidden><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v4H3zM9 12h6"/></svg><span id="archivedMessagesCount">0</span></button>
               <button class="icon-button" id="abortButton" title="Stop generation" disabled><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
               <button class="icon-button danger-button" id="deleteSessionButton" title="Delete conversation" aria-label="Delete conversation"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>
@@ -210,6 +216,15 @@
             </div>
           </section>
 
+          <section class="inspector-block integrations-block">
+            <div class="block-title"><span>Code workspace</span><small id="vscodeState">CHECKING</small></div>
+            <div class="integration-card vscode-card" id="vscodeCard">
+              <span class="integration-mark vscode-mark">&lt;/&gt;</span>
+              <div><strong>Visual Studio Code</strong><small id="vscodeDetail">Checking the local editor bridge</small></div>
+              <button type="button" id="openVsCodeButton">Open</button>
+            </div>
+          </section>
+
           <section class="inspector-block budget-block">
             <div class="block-title"><span>Paid API guard</span><small id="budgetState">$10 TARGET</small></div>
             <div class="budget-meter"><i id="budgetMeter"></i></div>
@@ -259,6 +274,8 @@
           <button class="setting-card interactive-setting motion-setting" type="button" id="settingsMotionButton"><span>Workspace atmosphere</span><strong id="settingsMotion">Orbit Drift</strong><small>Cycle motion environments or choose still mode</small></button>
           <button class="setting-card interactive-setting provider-setting" type="button" id="settingsProvidersButton"><span>Providers</span><strong id="settingsProviders">—</strong><small>Connect Zen, Gemini, DeepSeek, and other model providers</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsBrowserButton"><span>Agent browser</span><strong id="settingsBrowser">Checking</strong><small>Open a browser task</small></button>
+          <button class="setting-card interactive-setting board-setting" type="button" id="settingsAgentBoardButton"><span>Agent Board</span><strong id="settingsAgentBoard">Ready</strong><small>Coordinate specialist sessions and handoffs</small></button>
+          <button class="setting-card interactive-setting vscode-setting" type="button" id="settingsVsCodeButton"><span>Visual Studio Code</span><strong id="settingsVsCode">Checking</strong><small>Open the current project or a file and line</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsBlenderButton"><span>Blender MCP</span><strong id="settingsBlender">Checking</strong><small>Open Blender with the local bridge</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsDeepSeekButton"><span>DeepSeek V4</span><strong id="settingsDeepSeek">Ready for key</strong><small>Connect or manage the provider key</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsBudgetButton"><span>Paid API target</span><strong id="settingsBudget">$10 / month</strong><small>Review providers and set provider-side limits</small></button>
@@ -460,6 +477,60 @@
         <div class="modal-error" id="browserError" hidden></div>
         <div class="browser-privacy"><i></i><span>Isolated session</span><small>No saved browser profile</small></div>
         <div class="modal-actions"><button value="cancel" class="secondary-button">Cancel</button><button value="default" id="runBrowserButton" class="primary-button">Run browser task</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="agent-board-modal" id="agentBoardDialog">
+      <div class="agent-board-shell">
+        <header class="agent-board-header">
+          <div><div class="modal-kicker">MULTI-AGENT WORKFLOW</div><h2>Agent Board</h2><p>Independent OpenCode sessions share verified handoffs through explicit dependencies.</p></div>
+          <div class="agent-board-header-actions"><span class="board-state" id="agentBoardState"><i></i>Idle</span><button type="button" class="icon-button" id="closeAgentBoardButton" aria-label="Close Agent Board">×</button></div>
+        </header>
+        <section class="agent-board-toolbar">
+          <label class="board-objective"><span>Project objective</span><input id="agentBoardObjective" placeholder="What should this team deliver?" /></label>
+          <label class="board-concurrency"><span>Parallel agents</span><select id="agentBoardConcurrency" aria-label="Maximum parallel agents"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+          <button type="button" class="secondary-button" id="agentBoardImportButton">Import session</button>
+          <button type="button" class="secondary-button" id="agentBoardTemplateButton">Starter team</button>
+          <button type="button" class="secondary-button" id="agentBoardAddButton">Add agent</button>
+          <button type="button" class="primary-button" id="agentBoardRunButton">Run board</button>
+          <button type="button" class="secondary-button" id="agentBoardPauseButton">Pause queue</button>
+        </section>
+        <div class="agent-board-notice"><i></i><span>Each card is a real session. Models and access are chosen per agent. You see provider-supplied summaries and tool activity—not private chain-of-thought.</span></div>
+        <section class="agent-board-guide" id="agentBoardGuide">
+          <div><b>1</b><span><strong>Bring the brief</strong><small>Import your current planning session, or type an objective above.</small></span></div>
+          <div><b>2</b><span><strong>Build the team</strong><small>Use Starter team, then edit each model, access profile, task, and dependency.</small></span></div>
+          <div><b>3</b><span><strong>Run and supervise</strong><small>Approve actions in Seneschal. Open any card for its full transcript and live steps.</small></span></div>
+        </section>
+        <main class="agent-board-columns" id="agentBoardColumns"></main>
+        <footer class="agent-board-footer"><span id="agentBoardSummary">No agents yet.</span><div><button type="button" class="danger-text-button" id="agentBoardResetButton">Reset board</button><button type="button" class="secondary-button" id="agentBoardStopButton">Stop running agents</button></div></footer>
+      </div>
+    </dialog>
+
+    <dialog class="modal agent-editor-modal" id="agentEditorDialog">
+      <form id="agentEditorForm">
+        <div class="modal-kicker">BOARD AGENT</div><h2 id="agentEditorTitle">Add an agent</h2>
+        <div class="agent-editor-fields">
+          <label>Name<input id="agentNameInput" maxlength="48" placeholder="Researcher" required /></label>
+          <label>Role<select id="agentRoleInput"><option value="plan">Planner</option><option value="build">Builder</option><option value="review">Reviewer</option><option value="supervisor">Supervisor</option></select></label>
+          <label>Model<select id="agentModelInput"></select></label>
+          <label>System access<select id="agentAccessInput"><option value="observe">Conversation only</option><option value="read">Read project</option><option value="browser">Read + browser research</option><option value="build">Build and run tools</option></select></label>
+        </div>
+        <fieldset class="agent-dependency-field"><legend>Wait for these agents</legend><div class="agent-dependency-list" id="agentDependencyInput"><span>No other agents yet.</span></div><small>All selected agents must finish before this one starts.</small></fieldset>
+        <label>Task<textarea id="agentPromptInput" rows="7" placeholder="Give this agent one clear responsibility and expected output." required></textarea></label>
+        <input type="hidden" id="agentEditingID" />
+        <div class="modal-error" id="agentEditorError" hidden></div>
+        <div class="modal-actions"><button type="button" class="secondary-button" id="cancelAgentEditorButton">Cancel</button><button type="submit" class="primary-button">Save agent</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal vscode-modal" id="vscodeDialog">
+      <form id="vscodeForm">
+        <div class="modal-kicker">LOCAL EDITOR BRIDGE</div><h2>Open in Visual Studio Code</h2>
+        <p>Open the current WSL project, or jump directly to a file and line. Install the optional companion to add a Seneschal button inside VS Code for opening this project or choosing its session.</p>
+        <label>File path (optional)<input id="vscodePathInput" spellcheck="false" placeholder="/home/user/projects/app/src/main.ts" /></label>
+        <div class="vscode-position-fields"><label>Line<input id="vscodeLineInput" type="number" min="1" value="1" /></label><label>Column<input id="vscodeColumnInput" type="number" min="1" value="1" /></label></div>
+        <div class="modal-error" id="vscodeError" hidden></div>
+        <div class="modal-actions"><button type="button" class="secondary-button" id="cancelVsCodeButton">Cancel</button><button type="button" class="secondary-button" id="installVsCodeCompanionButton">Install companion</button><button type="button" class="secondary-button" id="openVsCodeProjectButton">Open project</button><button type="submit" class="primary-button">Open file</button></div>
       </form>
     </dialog>
 

@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
 test("release contains the required portable files", () => {
-  for (const file of ["server.js", "app/index.html", "app/app.js", "app/styles.css", "install.ps1", "scripts/start-playwright-mcp.cmd", "config/opencode.template.json", "docs/images/seneschal-workspace-night.png", "assets/social/seneschal-social-preview.png", "assets/social/seneschal-linkedin-launch.png"]) {
+  for (const file of ["server.js", "app/index.html", "app/app.js", "app/styles.css", "install.ps1", "scripts/start-playwright-mcp.cmd", "config/opencode.template.json", "extensions/seneschal-vscode/package.json", "extensions/seneschal-vscode/extension.js", "extensions/seneschal-vscode/seneschal-vscode.vsix", "docs/images/seneschal-workspace-night.png", "docs/images/seneschal-agent-board-night.png", "assets/social/seneschal-social-preview.png", "assets/social/seneschal-linkedin-launch.png"]) {
     assert.equal(fs.existsSync(path.join(root, file)), true, `${file} is missing`);
   }
 });
@@ -67,6 +67,7 @@ test("public launch materials reference privacy-safe visual assets", () => {
   const readme = read("README.md");
   assert.match(readme, /assets\/social\/seneschal-social-preview\.png/);
   assert.match(readme, /docs\/images\/seneschal-workspace-night\.png/);
+  assert.match(readme, /docs\/images\/seneschal-agent-board-night\.png/);
   assert.match(readme, /privacy-safe product illustration/);
   assert.ok(fs.existsSync(path.join(root, "assets/social/seneschal-linkedin-launch.png")));
 });
@@ -132,10 +133,14 @@ test("Playwright Brave can switch between hidden and visible agent-controlled mo
   assert.match(server, /restartPlaywrightBridge/);
   assert.match(server, /\/mcp\/playwright\/\$\{action\}/);
   assert.match(server, /configuredLauncher/);
+  assert.match(server, /ensureVisibilityAwareBrowserLauncher/);
+  assert.match(server, /legacy-headless-backup/);
   assert.doesNotMatch(server, /\/instance\/dispose/);
   assert.match(server, /body\.directory \|\| launchDirectory/);
   assert.match(app, /toggleBrowserWindow/);
   assert.match(app, /body: \{ visible: true, directory: state\.currentDirectory \}/);
+  assert.match(app, /Visible Brave enabled for this browser task/);
+  assert.match(app, /playw\(\?:right\|rite\)\|browser/);
   assert.match(app, /Visible browser control needs one Seneschal restart/);
 });
 
@@ -147,6 +152,53 @@ test("model choices are isolated per session and background work survives naviga
   assert.match(app, /is still running in the background/);
   const selectSession = app.slice(app.indexOf("async function selectSession"), app.indexOf("async function newSession"));
   assert.doesNotMatch(selectSession, /\/abort/);
+});
+
+test("Agent Board coordinates real sessions with persistent dependency handoffs", () => {
+  const html = read("app/index.html");
+  const app = read("app/app.js");
+  const server = read("server.js");
+  assert.match(html, /agentBoardDialog/);
+  assert.match(app, /\["ready", "Ready"/);
+  assert.match(app, /\["waiting", "Waiting"/);
+  assert.match(app, /\["running", "Running"/);
+  assert.match(app, /\["done", "Done"/);
+  assert.match(app, /runBoardAgent/);
+  assert.match(app, /scheduleReadyBoardAgents/);
+  assert.match(app, /boardAgentResult/);
+  assert.match(app, /Verified dependency handoffs/);
+  assert.match(app, /prompt_async/);
+  assert.match(app, /agent\.sessionID/);
+  assert.match(html, /agentBoardImportButton/);
+  assert.match(html, /agentAccessInput/);
+  assert.match(app, /importCurrentSessionToBoard/);
+  assert.match(app, /updateBoardActivityFromPart/);
+  assert.match(app, /stopBoardAgent/);
+  assert.match(app, /Conversation only/);
+  assert.match(app, /Browser research/);
+  assert.match(app, /Build tools/);
+  assert.match(server, /agent-board\.json/);
+  assert.match(server, /\/workspace\/agent-board/);
+});
+
+test("Visual Studio Code bridge opens WSL projects and exact file locations", () => {
+  const html = read("app/index.html");
+  const app = read("app/app.js");
+  const server = read("server.js");
+  assert.match(html, /openSessionVsCodeButton/);
+  assert.match(html, /vscodeDialog/);
+  assert.match(app, /\/workspace\/vscode\/open/);
+  assert.match(server, /findVsCodeExecutable/);
+  assert.match(server, /--remote/);
+  assert.match(server, /--goto/);
+  assert.match(server, /wsl\+\$\{wslDistribution\}/);
+  assert.match(html, /installVsCodeCompanionButton/);
+  assert.match(server, /installVsCodeCompanion/);
+  assert.match(server, /vscode-connection\.json/);
+  const extension = read("extensions/seneschal-vscode/extension.js");
+  assert.match(read("extensions/seneschal-vscode/package.json"), /Seneschal: Open Project or Session/);
+  assert.match(extension, /Choose a Seneschal session/);
+  assert.match(extension, /atelier_session/);
 });
 
 test("hidden launcher leaves a useful failure report", () => {

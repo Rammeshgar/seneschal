@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.1-beta.12 — 2026-08-30
+
+- Repairs legacy Playwright launchers that were permanently hard-coded to hidden mode, then reconnects only Playwright so other sessions keep running
+- Detects direct browser requests, URLs, and the common `playwrite` misspelling before a task starts, enabling the visible agent-controlled Brave window automatically
+- Lets an existing planning session become the Agent Board's retained source brief without copying or losing its conversation
+- Adds per-agent model, role, access profile, multi-agent dependencies, live provider summary/tool activity, individual stop, edit, retry, and retained-session controls
+- Makes the Supervisor a normal configurable agent that can use any connected model and wait for every required worker
+- Adds guided Agent Board onboarding and makes the distinction between provider summaries and private chain-of-thought explicit
+- Adds an optional VS Code companion with a Seneschal status-bar button for opening the current project, choosing a project session, or creating a new project session
+- Adds a fresh privacy-safe Agent Board screenshot and packages the companion extension in the installer and release ZIP
+
+## 0.2.1-beta.11 — 2026-08-30
+
+- Adds a persistent Agent Board backed by real OpenCode sessions
+- Adds configurable parallelism, dependency waiting, labelled handoffs, retained session links, pause/stop controls, and a Planner → Builder → Reviewer → Supervisor starter team
+- Adds a local Visual Studio Code bridge for opening the current WSL project or an exact file, line, and column
+- Automatically enables the visible Playwright Brave window for explicit browser prompts, including prompts typed directly into a session
+- Preserves other running sessions when browser visibility changes by reconnecting only the Playwright MCP bridge
+- Adds updated privacy-safe workspace and Agent Board screenshots
+- Expands installer cleanup through beta 10 while preserving the single Seneschal desktop shortcut
+
 ## 0.2.1-beta.10 — 2026-08-30
 
 - Keeps each session's selected model independent instead of changing every session

@@ -36,6 +36,7 @@
     attachments: [],
     currentDirectory: storage.get("atelier-directory", ""),
     currentSessionID: storage.get("atelier-session", ""),
+    launchSelection: { directory: new URLSearchParams(location.search).get("directory") || "", sessionID: new URLSearchParams(location.search).get("session") || "" },
     pendingDeleteSessionID: "",
     pendingDeleteMessageID: "",
     pendingDeleteProject: "",
@@ -79,6 +80,10 @@
     instructionsDirty: false,
     blender: { installed: false, bridge: false },
     browserRuntime: { available: false, visible: false, restarting: false },
+    vscodeRuntime: { available: false, remote: "", companionAvailable: false },
+    agentBoard: { version: 2, directory: "", objective: "", concurrency: 2, active: false, paused: false, agents: [] },
+    agentBoardTimer: null,
+    agentBoardSaving: null,
     paidUsage: { budget: 10, cost: null, percent: null },
     permissionTimer: null
   };
@@ -111,6 +116,9 @@
     browserForm: $("#browserForm"), browserUrl: $("#browserUrlInput"), browserTask: $("#browserTaskInput"), browserError: $("#browserError"), browserWindow: $("#browserWindowButton"), browserWindowCard: $("#browserWindowCardButton"),
     blenderState: $("#blenderState"), blenderCard: $("#blenderCard"), blenderDetail: $("#blenderDetail"),
     budgetState: $("#budgetState"), budgetMeter: $("#budgetMeter"), budgetAmount: $("#budgetAmount"),
+    vscodeState: $("#vscodeState"), vscodeCard: $("#vscodeCard"), vscodeDetail: $("#vscodeDetail"), vscodeDialog: $("#vscodeDialog"), vscodeForm: $("#vscodeForm"), vscodePath: $("#vscodePathInput"), vscodeLine: $("#vscodeLineInput"), vscodeColumn: $("#vscodeColumnInput"), vscodeError: $("#vscodeError"),
+    agentBoardDialog: $("#agentBoardDialog"), agentBoardColumns: $("#agentBoardColumns"), agentBoardObjective: $("#agentBoardObjective"), agentBoardConcurrency: $("#agentBoardConcurrency"), agentBoardState: $("#agentBoardState"), agentBoardSummary: $("#agentBoardSummary"),
+    agentEditorDialog: $("#agentEditorDialog"), agentEditorForm: $("#agentEditorForm"), agentName: $("#agentNameInput"), agentRole: $("#agentRoleInput"), agentModel: $("#agentModelInput"), agentAccess: $("#agentAccessInput"), agentDependency: $("#agentDependencyInput"), agentPrompt: $("#agentPromptInput"), agentEditingID: $("#agentEditingID"), agentEditorError: $("#agentEditorError"),
     instructionDialog: $("#instructionDialog"), instructionSaveState: $("#instructionSaveState"), instructionError: $("#instructionError"),
     personaEditor: $("#personaEditor"), generalEditor: $("#generalEditor"), projectEditor: $("#projectEditor"),
     buildAgentEditor: $("#buildAgentEditor"), planAgentEditor: $("#planAgentEditor"),
@@ -980,23 +988,24 @@
     const connected = status === "connected";
     const runtimeAvailable = Boolean(state.browserRuntime?.available);
     const visible = Boolean(state.browserRuntime?.visible);
+    const repairing = Boolean(state.browserRuntime?.repairing);
     els.browserState.textContent = connected ? "READY" : status.toUpperCase();
     els.browserState.style.color = connected ? "var(--forest)" : "var(--danger)";
     els.browserCard.className = `browser-card ${connected ? "connected" : "error"}`;
-    els.browserDetail.textContent = connected ? "Navigate, click, type, inspect, screenshot" : "Browser bridge is not available";
+    els.browserDetail.textContent = repairing ? "Legacy hidden launcher detected · Show will repair it" : connected ? "Navigate, click, type, inspect, screenshot" : "Browser bridge is not available";
     $("#browserTryButton").disabled = !connected;
     $("#browserButton").disabled = !connected;
     [els.browserWindow, els.browserWindowCard].forEach((button) => {
       if (!button) return;
       button.disabled = !runtimeAvailable || Boolean(state.browserRuntime?.restarting);
       button.setAttribute("aria-pressed", String(visible));
-      const label = visible ? "Hide" : "Show";
+      const label = visible ? "Hide" : repairing ? "Repair & show" : "Show";
       const span = $("span", button);
       if (span) span.textContent = button === els.browserWindowCard ? `${label} window` : label;
       button.setAttribute("aria-label", `${label} the agent-controlled Brave window`);
       button.setAttribute("title", `${label} the agent-controlled Brave window`);
     });
-    $("#settingsBrowser").textContent = !runtimeAvailable ? "Unavailable" : visible ? "Visible Brave" : connected ? "Connected · hidden" : "Hidden mode";
+    $("#settingsBrowser").textContent = !runtimeAvailable ? "Unavailable" : visible ? "Visible Brave" : repairing ? "Repair required" : connected ? "Connected · hidden" : "Hidden mode";
   }
 
   function blenderMcpConnection() {
@@ -1032,6 +1041,383 @@
     workspace("/workspace/blender-health").then((blender) => { state.blender = blender; renderBlender(); }).catch(() => renderBlender());
     workspace("/workspace/usage").then((usage) => { state.paidUsage = usage; renderPaidUsage(); }).catch(() => renderPaidUsage());
     workspace("/workspace/browser-mode").then((runtime) => { state.browserRuntime = runtime; renderBrowser(); }).catch(() => renderBrowser());
+    workspace("/workspace/vscode").then((runtime) => { state.vscodeRuntime = runtime; renderVsCode(); }).catch(() => renderVsCode());
+    workspace("/workspace/agent-board").then((board) => { state.agentBoard = normalizeAgentBoard(board); renderAgentBoard(); startAgentBoardMonitor(); }).catch(() => renderAgentBoard());
+  }
+
+  function renderVsCode() {
+    const available = Boolean(state.vscodeRuntime?.available);
+    els.vscodeState.textContent = available ? "READY" : "OFFLINE";
+    els.vscodeState.style.color = available ? "var(--forest)" : "var(--danger)";
+    els.vscodeCard.className = `integration-card vscode-card ${available ? "online" : ""}`;
+    els.vscodeDetail.textContent = available ? `Open WSL projects through ${state.vscodeRuntime.remote || "VS Code"}` : "Visual Studio Code was not found";
+    $("#openVsCodeButton").disabled = !available;
+    $("#openSessionVsCodeButton").disabled = !available || !state.currentDirectory;
+    $("#installVsCodeCompanionButton").disabled = !available || !state.vscodeRuntime?.companionAvailable;
+    $("#settingsVsCode").textContent = available ? "Ready" : "Unavailable";
+  }
+
+  function openVsCodeDialog() {
+    if (!state.vscodeRuntime?.available) { toast("Visual Studio Code is not available on this PC.", "warn"); return; }
+    if (els.settingsDialog.open) els.settingsDialog.close();
+    els.vscodeError.hidden = true;
+    els.vscodePath.value = "";
+    els.vscodeLine.value = "1";
+    els.vscodeColumn.value = "1";
+    els.vscodeDialog.showModal();
+    setTimeout(() => els.vscodePath.focus(), 30);
+  }
+
+  async function openVsCode(resource = "") {
+    try {
+      const result = await workspace("/workspace/vscode/open", { method: "POST", body: { directory: state.currentDirectory, resource, line: els.vscodeLine?.value || 1, column: els.vscodeColumn?.value || 1, newWindow: true } });
+      if (els.vscodeDialog.open) els.vscodeDialog.close();
+      toast(resource ? `Opening ${basename(resource)} in VS Code.` : `Opening ${basename(state.currentDirectory)} in VS Code.`);
+      return result;
+    } catch (error) {
+      if (els.vscodeDialog.open) { els.vscodeError.textContent = error.message; els.vscodeError.hidden = false; }
+      else toast(`Could not open VS Code: ${error.message}`, "error");
+      return null;
+    }
+  }
+
+  async function installVsCodeCompanion() {
+    try {
+      await workspace("/workspace/vscode/install-companion", { method: "POST", body: {} });
+      toast("Installing the Seneschal button in VS Code. Reload VS Code once, then use the Seneschal status-bar button.");
+    } catch (error) {
+      els.vscodeError.textContent = error.message; els.vscodeError.hidden = false;
+    }
+  }
+
+  function normalizeAgentBoard(board = {}) {
+    const agents = Array.isArray(board.agents) ? board.agents.filter((agent) => agent && agent.id).map((agent) => ({
+      id: String(agent.id), name: String(agent.name || "Agent").slice(0, 48), role: ["source", "plan", "build", "review", "supervisor"].includes(agent.role) ? agent.role : "build",
+      prompt: String(agent.prompt || ""), model: String(agent.model || ""), dependencies: Array.isArray(agent.dependencies) ? agent.dependencies.map(String).filter(Boolean) : [],
+      access: ["observe", "read", "browser", "build"].includes(agent.access) ? agent.access : agent.role === "build" ? "build" : "read",
+      imported: Boolean(agent.imported), activity: String(agent.activity || ""), activityType: String(agent.activityType || ""), activityAt: Number(agent.activityAt || 0),
+      sessionID: String(agent.sessionID || ""), status: ["ready", "waiting", "running", "complete", "failed"].includes(agent.status) ? agent.status : "ready",
+      error: String(agent.error || ""), startedAt: Number(agent.startedAt || 0), completedAt: Number(agent.completedAt || 0)
+    })) : [];
+    const ids = new Set(agents.map((agent) => agent.id));
+    agents.forEach((agent) => { agent.dependencies = agent.dependencies.filter((id) => ids.has(id) && id !== agent.id); });
+    return {
+      version: 2, directory: String(board.directory || ""), objective: String(board.objective || ""), concurrency: Math.min(4, Math.max(1, Number(board.concurrency) || 2)),
+      active: Boolean(board.active), paused: Boolean(board.paused), agents
+    };
+  }
+
+  function boardAgent(id) { return state.agentBoard.agents.find((agent) => agent.id === id); }
+  function boardRoleLabel(role) { return ({ source: "Source session", plan: "Planner", build: "Builder", review: "Reviewer", supervisor: "Supervisor" })[role] || "Agent"; }
+  function boardRoleMark(role) { return ({ source: "IN", plan: "PL", build: "BU", review: "RV", supervisor: "SV" })[role] || "AG"; }
+  function boardAccessLabel(access) { return ({ observe: "Conversation only", read: "Read project", browser: "Browser research", build: "Build tools" })[access] || "Read project"; }
+  function boardColumnStatus(agent) {
+    if (["complete", "failed"].includes(agent.status)) return "done";
+    if (agent.status === "running") return "running";
+    const dependencies = agent.dependencies.map(boardAgent).filter(Boolean);
+    return dependencies.length && dependencies.some((item) => item.status !== "complete") ? "waiting" : "ready";
+  }
+
+  function boardCounts() {
+    return state.agentBoard.agents.reduce((counts, agent) => { counts[boardColumnStatus(agent)] += 1; return counts; }, { ready: 0, waiting: 0, running: 0, done: 0 });
+  }
+
+  function scheduleAgentBoardSave() {
+    clearTimeout(state.agentBoardSaving);
+    state.agentBoardSaving = setTimeout(() => workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard }).catch((error) => toast(`Agent Board could not be saved: ${error.message}`, "error")), 180);
+  }
+
+  function renderAgentBoard() {
+    const board = state.agentBoard;
+    const counts = boardCounts();
+    $("#agentBoardRailCount").textContent = String(board.agents.length);
+    $("#settingsAgentBoard").textContent = board.active ? `${counts.running} running` : board.agents.length ? `${board.agents.length} agents` : "Ready";
+    if (!els.agentBoardColumns) return;
+    $("#agentBoardGuide").hidden = board.agents.length > 0;
+    if (document.activeElement !== els.agentBoardObjective) els.agentBoardObjective.value = board.objective;
+    els.agentBoardConcurrency.value = String(board.concurrency);
+    els.agentBoardState.className = `board-state ${board.active ? board.paused ? "paused" : "running" : ""}`;
+    els.agentBoardState.innerHTML = `<i></i>${board.active ? board.paused ? "Paused" : "Running" : "Idle"}`;
+    const columnDefinitions = [
+      ["ready", "Ready", "Agents whose dependencies are complete."], ["waiting", "Waiting", "Blocked until another agent finishes."],
+      ["running", "Running", "Independent OpenCode sessions working now."], ["done", "Done", "Completed or failed agents with retained sessions."]
+    ];
+    els.agentBoardColumns.innerHTML = columnDefinitions.map(([key, title, empty]) => {
+      const agents = board.agents.filter((agent) => boardColumnStatus(agent) === key);
+      return `<section class="board-column"><header><span>${title}</span><b>${agents.length}</b></header><div class="board-column-list">${agents.length ? agents.map(renderBoardAgentCard).join("") : `<div class="board-empty">${empty}</div>`}</div></section>`;
+    }).join("");
+    const complete = board.agents.filter((agent) => agent.status === "complete").length;
+    const failed = board.agents.filter((agent) => agent.status === "failed").length;
+    els.agentBoardSummary.textContent = board.agents.length ? `${complete} completed · ${counts.running} running · ${counts.waiting} waiting${failed ? ` · ${failed} failed` : ""}` : "No agents yet. Add one or use Starter team.";
+    $("#agentBoardRunButton").disabled = !board.agents.length || !state.currentDirectory;
+    $("#agentBoardImportButton").disabled = !selectedSession();
+    $("#agentBoardPauseButton").disabled = !board.active;
+    $("#agentBoardPauseButton").textContent = board.paused ? "Resume queue" : "Pause queue";
+    $("#agentBoardStopButton").disabled = !counts.running;
+    $$('[data-board-open]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => openBoardSession(button.dataset.boardOpen)));
+    $$('[data-board-run]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => runBoardAgent(button.dataset.boardRun, true)));
+    $$('[data-board-edit]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => openAgentEditor(button.dataset.boardEdit)));
+    $$('[data-board-delete]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => deleteBoardAgent(button.dataset.boardDelete)));
+    $$('[data-board-stop]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => stopBoardAgent(button.dataset.boardStop)));
+  }
+
+  function renderBoardAgentCard(agent) {
+    const dependencyNames = agent.dependencies.map((id) => boardAgent(id)?.name).filter(Boolean);
+    const columnStatus = boardColumnStatus(agent);
+    const sessionStatusText = agent.status === "failed" ? "Failed" : agent.status === "complete" ? "Complete" : columnStatus === "waiting" ? "Waiting" : agent.status === "running" ? "Working" : "Ready";
+    const sessionButton = agent.sessionID ? `<button type="button" data-board-open="${escapeHTML(agent.id)}">Open session</button>` : "";
+    const runButton = agent.imported ? "" : `<button type="button" data-board-run="${escapeHTML(agent.id)}"${agent.status === "running" || columnStatus === "waiting" ? " disabled" : ""}>${["complete", "failed"].includes(agent.status) ? "Run again" : "Run"}</button>`;
+    const stopButton = agent.status === "running" ? `<button type="button" class="board-stop-button" data-board-stop="${escapeHTML(agent.id)}">Stop</button>` : "";
+    const activity = agent.activity ? `<div class="board-agent-activity"><strong>${escapeHTML(agent.activityType || "Live activity")}</strong><span title="${escapeHTML(agent.activity)}">${escapeHTML(agent.activity)}</span></div>` : "";
+    return `<article class="board-agent-card ${escapeHTML(agent.status === "ready" ? columnStatus : agent.status)}"><div class="board-agent-head"><span class="board-agent-role">${boardRoleMark(agent.role)}</span><div class="board-agent-title"><strong>${escapeHTML(agent.name)}</strong><small>${escapeHTML(boardRoleLabel(agent.role))} · ${escapeHTML(state.models.find((model) => model.value === agent.model)?.name || (agent.imported ? "Imported model" : "Current model"))}</small></div><div class="board-agent-menu"><button type="button" data-board-edit="${escapeHTML(agent.id)}" title="${agent.status === "running" ? "Stop this agent before editing" : "Edit agent"}"${agent.status === "running" || agent.imported ? " disabled" : ""}>✎</button><button type="button" class="danger" data-board-delete="${escapeHTML(agent.id)}" title="Delete card"${agent.status === "running" ? " disabled" : ""}>×</button></div></div><div class="board-agent-meta"><span>${escapeHTML(boardAccessLabel(agent.access))}</span>${agent.imported ? "<span>Imported context</span>" : ""}</div><p>${escapeHTML(agent.error || agent.prompt || "No task written yet.")}</p>${activity}${dependencyNames.length ? `<div class="board-dependency">Waits for: ${escapeHTML(dependencyNames.join(", "))}</div>` : ""}<div class="board-agent-actions"><span>${sessionStatusText}</span><div>${sessionButton}${stopButton}${runButton}</div></div></article>`;
+  }
+
+  async function openAgentBoard() {
+    if (els.settingsDialog.open) els.settingsDialog.close();
+    if (!state.agentBoard.directory && state.currentDirectory) state.agentBoard.directory = state.currentDirectory;
+    if (state.agentBoard.directory && state.agentBoard.directory !== state.currentDirectory) await switchDirectory(state.agentBoard.directory);
+    renderAgentBoard();
+    els.agentBoardDialog.showModal();
+  }
+
+  function boardModelOptions(selected = "") {
+    return state.models.map((model) => `<option value="${escapeHTML(model.value)}"${model.value === selected ? " selected" : ""}>${escapeHTML(model.name)} · ${escapeHTML(model.providerName)}</option>`).join("");
+  }
+
+  function openAgentEditor(agentID = "") {
+    const agent = agentID ? boardAgent(agentID) : null;
+    if (agent?.imported) return;
+    els.agentEditorError.hidden = true;
+    els.agentEditingID.value = agent?.id || "";
+    $("#agentEditorTitle").textContent = agent ? "Edit agent" : "Add an agent";
+    els.agentName.value = agent?.name || "";
+    els.agentRole.value = agent?.role || "build";
+    els.agentModel.innerHTML = boardModelOptions(agent?.model || state.selectedModel);
+    els.agentAccess.value = agent?.access || (agent?.role === "build" ? "build" : "read");
+    const dependencies = state.agentBoard.agents.filter((item) => item.id !== agentID);
+    els.agentDependency.innerHTML = dependencies.length ? dependencies.map((item) => `<label><input type="checkbox" value="${escapeHTML(item.id)}"${agent?.dependencies?.includes(item.id) ? " checked" : ""}/><span>${escapeHTML(item.name)} · ${escapeHTML(boardRoleLabel(item.role))}</span></label>`).join("") : "<span>No other agents yet.</span>";
+    els.agentPrompt.value = agent?.prompt || "";
+    els.agentEditorDialog.showModal();
+    setTimeout(() => els.agentName.focus(), 30);
+  }
+
+  function saveAgentEditor(event) {
+    event.preventDefault();
+    const name = els.agentName.value.trim();
+    const prompt = els.agentPrompt.value.trim();
+    if (!name || !prompt) { els.agentEditorError.textContent = "Give the agent a name and a clear task."; els.agentEditorError.hidden = false; return; }
+    const existing = boardAgent(els.agentEditingID.value);
+    const agent = existing || { id: `agent-${crypto.randomUUID()}`, sessionID: "", status: "ready", error: "", startedAt: 0, completedAt: 0 };
+    const dependencies = $$('input[type="checkbox"]:checked', els.agentDependency).map((input) => input.value);
+    Object.assign(agent, { name, role: els.agentRole.value, model: els.agentModel.value || state.selectedModel, access: els.agentAccess.value, prompt, dependencies });
+    if (!existing) state.agentBoard.agents.push(agent);
+    else if (["complete", "failed"].includes(agent.status)) { agent.status = "ready"; agent.error = ""; }
+    state.agentBoard.directory ||= state.currentDirectory;
+    scheduleAgentBoardSave();
+    els.agentEditorDialog.close();
+    renderAgentBoard();
+  }
+
+  function createStarterBoard() {
+    const imported = state.agentBoard.agents.filter((agent) => agent.imported);
+    const existingWorkers = state.agentBoard.agents.filter((agent) => !agent.imported);
+    if (existingWorkers.length && !confirm("Replace the current worker agents with the starter team? Imported source sessions and all linked sessions will remain.")) return;
+    const planner = `agent-${crypto.randomUUID()}`, builder = `agent-${crypto.randomUUID()}`, reviewer = `agent-${crypto.randomUUID()}`, supervisor = `agent-${crypto.randomUUID()}`;
+    const model = state.selectedModel || state.models[0]?.value || "";
+    state.agentBoard = normalizeAgentBoard({ version: 2, directory: state.currentDirectory, objective: state.agentBoard.objective, concurrency: 2, active: false, paused: false, agents: [
+      ...imported,
+      { id: planner, name: "Planner", role: "plan", model, access: "read", prompt: "Analyze the objective, imported brief, and project. Produce a concrete implementation plan, risks, acceptance criteria, and the exact handoff the Builder needs.", dependencies: imported.map((agent) => agent.id), status: "ready" },
+      { id: builder, name: "Builder", role: "build", model, access: "build", prompt: "Implement the approved objective using the Planner handoff. Preserve existing work, run relevant tests, and report exact files changed and remaining risks.", dependencies: [planner], status: "ready" },
+      { id: reviewer, name: "Reviewer", role: "review", model, access: "read", prompt: "Review the Builder result against the objective and acceptance criteria. Inspect the actual project, run focused verification, and report concrete defects without changing files.", dependencies: [builder], status: "ready" },
+      { id: supervisor, name: "Supervisor", role: "supervisor", model, access: "read", prompt: "Supervise the complete workflow. Review every supplied handoff, reconcile disagreements, verify whether the objective is genuinely complete, and give the user one concise final report with blockers or required follow-up.", dependencies: [planner, builder, reviewer], status: "ready" }
+    ] });
+    scheduleAgentBoardSave();
+    renderAgentBoard();
+  }
+
+  async function importCurrentSessionToBoard() {
+    const session = selectedSession();
+    if (!session) { toast("Open the planning session you want to import first.", "warn"); return; }
+    if (state.agentBoard.agents.some((agent) => agent.sessionID === session.id)) { toast("This session is already on the Agent Board."); await openAgentBoard(); return; }
+    if (state.agentBoard.agents.length && state.agentBoard.directory && state.agentBoard.directory !== session.directory) {
+      toast("This board belongs to another project. Reset it before importing a session from this project.", "warn"); return;
+    }
+    const liveStatus = state.statuses[session.id]?.type || state.statuses[session.id]?.status;
+    const running = liveStatus === "busy" || liveStatus === "running";
+    const source = normalizeAgentBoard({ agents: [{
+      id: `agent-${crypto.randomUUID()}`, name: session.title || "Imported planning session", role: "source", access: "read", imported: true,
+      model: state.sessionModels[session.id] || modelReference(session) || state.selectedModel, prompt: "Imported conversation used as the verified project brief and planning context.",
+      dependencies: [], sessionID: session.id, status: running ? "running" : "complete", activity: running ? "The imported session is still working." : "Conversation ready as a handoff.", activityType: running ? "Live session" : "Imported brief", completedAt: running ? 0 : Date.now()
+    }] }).agents[0];
+    state.agentBoard.directory = session.directory;
+    state.agentBoard.agents.push(source);
+    state.agentBoard.objective ||= session.title || "Complete the planned project.";
+    if (running) { state.agentBoard.active = true; startAgentBoardMonitor(); }
+    scheduleAgentBoardSave(); renderAgentBoard();
+    if (!els.agentBoardDialog.open) await openAgentBoard();
+    toast("Current session added as the board's project brief. Add the Starter team, choose each model and access level, then Run board.");
+  }
+
+  async function boardAgentResult(agent) {
+    if (!agent?.sessionID) return "No session output was available.";
+    try {
+      const messages = await api(`/session/${encodeURIComponent(agent.sessionID)}/message`, { directory: state.agentBoard.directory || state.currentDirectory });
+      if (agent.imported) {
+        const transcript = messages.map((message) => {
+          const text = (message.parts || []).filter((part) => part.type === "text").map((part) => part.text || "").join("\n").trim();
+          return text ? `### ${message.info?.role === "user" ? "User" : "Assistant"}\n${text}` : "";
+        }).filter(Boolean).join("\n\n");
+        return transcript.slice(-30000) || "The imported session contains no textual conversation yet.";
+      }
+      const assistant = [...messages].reverse().find((message) => message.info?.role === "assistant");
+      const text = (assistant?.parts || []).filter((part) => part.type === "text").map((part) => part.text || "").join("\n").trim();
+      return text.slice(-18000) || "The dependency finished without a textual summary. Inspect its linked session if needed.";
+    } catch { return "The dependency session could not be read. Inspect its linked session manually."; }
+  }
+
+  async function boardPrompt(agent) {
+    const handoffs = [];
+    for (const dependencyID of agent.dependencies) {
+      const dependency = boardAgent(dependencyID);
+      if (!dependency) continue;
+      handoffs.push(`## Handoff from ${dependency.name} (${boardRoleLabel(dependency.role)})\n${await boardAgentResult(dependency)}`);
+    }
+    return `You are the ${boardRoleLabel(agent.role)} named ${agent.name} on a Seneschal Agent Board.\n\n# Shared objective\n${state.agentBoard.objective || "Complete the assigned project task."}\n\n# Your responsibility\n${agent.prompt}\n\n${handoffs.length ? `# Verified dependency handoffs\n${handoffs.join("\n\n")}` : "# Dependencies\nNone. Begin from the project state and objective."}\n\nWork only within your responsibility. Inspect the real project state, respect approvals, and finish with a clear handoff containing results, changed files, verification, blockers, and what the next agent needs.`;
+  }
+
+  async function runBoardAgent(agentID, manual = false) {
+    const agent = boardAgent(agentID);
+    if (!agent || agent.status === "running") return false;
+    const unmet = agent.dependencies.map(boardAgent).filter((item) => !item || item.status !== "complete");
+    if (unmet.length) { if (manual) toast(`${agent.name} is waiting for ${unmet.map((item) => item?.name || "a dependency").join(", ")}.`, "warn"); return false; }
+    const directory = state.agentBoard.directory || state.currentDirectory;
+    const model = state.models.find((item) => item.value === agent.model) || selectedModel() || state.models[0];
+    if (!directory || !model) { toast("Choose a project and connected model before running the board.", "warn"); return false; }
+    agent.status = "running"; agent.error = ""; agent.activity = "Creating or reconnecting the worker session…"; agent.activityType = "Starting"; agent.activityAt = Date.now(); agent.startedAt = Date.now(); agent.completedAt = 0;
+    state.agentBoard.active = true; state.agentBoard.paused = false;
+    renderAgentBoard(); scheduleAgentBoardSave(); startAgentBoardMonitor();
+    try {
+      if (!agent.sessionID || !state.sessions.some((session) => session.id === agent.sessionID)) {
+        const session = await api("/session", { directory, method: "POST", body: { title: `[Board] ${agent.name}` } });
+        agent.sessionID = session.id;
+        state.sessions.unshift(session);
+      }
+      const text = await boardPrompt(agent);
+      const requestAgent = agent.access === "build" ? "build" : "plan";
+      const availableTools = [...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"].filter((tool) => tool && tool !== "invalid"))];
+      const allowed = {
+        observe: () => false,
+        read: (tool) => /^(read|glob|grep)$/.test(tool),
+        browser: (tool) => /^(read|glob|grep|webfetch|websearch)$/.test(tool) || /^playwright_/.test(tool),
+        build: () => true
+      }[agent.access] || ((tool) => /^(read|glob|grep)$/.test(tool));
+      const toolOverrides = Object.fromEntries(availableTools.map((tool) => [tool, allowed(tool)]));
+      state.statuses[agent.sessionID] = { type: "busy" };
+      await api(`/session/${encodeURIComponent(agent.sessionID)}/prompt_async`, { directory, method: "POST", body: { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools: toolOverrides, agent: requestAgent, parts: [{ type: "text", text }] } });
+      agent.activity = "Prompt accepted. Waiting for the first model step…"; agent.activityType = "Working"; agent.activityAt = Date.now();
+      scheduleAgentBoardSave(); renderSessions(); renderAgentBoard();
+      return true;
+    } catch (error) {
+      agent.status = "failed"; agent.error = error.message; agent.completedAt = Date.now();
+      scheduleAgentBoardSave(); renderAgentBoard(); toast(`${agent.name} failed to start: ${error.message}`, "error");
+      return false;
+    }
+  }
+
+  async function runAgentBoard() {
+    state.agentBoard.objective = els.agentBoardObjective.value.trim();
+    state.agentBoard.directory ||= state.currentDirectory;
+    state.agentBoard.concurrency = Number(els.agentBoardConcurrency.value) || 2;
+    state.agentBoard.active = true; state.agentBoard.paused = false;
+    scheduleAgentBoardSave(); renderAgentBoard(); startAgentBoardMonitor();
+    await scheduleReadyBoardAgents();
+  }
+
+  async function scheduleReadyBoardAgents() {
+    if (!state.agentBoard.active || state.agentBoard.paused) return;
+    const running = state.agentBoard.agents.filter((agent) => agent.status === "running").length;
+    const capacity = Math.max(0, state.agentBoard.concurrency - running);
+    const ready = state.agentBoard.agents.filter((agent) => agent.status === "ready" && agent.dependencies.every((id) => boardAgent(id)?.status === "complete")).slice(0, capacity);
+    for (const agent of ready) await runBoardAgent(agent.id);
+    const stillRunning = state.agentBoard.agents.some((agent) => agent.status === "running");
+    const runnable = state.agentBoard.agents.some((agent) => agent.status === "ready" && agent.dependencies.every((id) => boardAgent(id)?.status === "complete"));
+    if (!stillRunning && !runnable) { state.agentBoard.active = false; state.agentBoard.paused = false; scheduleAgentBoardSave(); renderAgentBoard(); stopAgentBoardMonitor(); }
+  }
+
+  async function reconcileAgentBoardStatuses(statuses = state.statuses) {
+    let changed = false;
+    for (const agent of state.agentBoard.agents.filter((item) => item.status === "running" && item.sessionID)) {
+      const entry = statuses[agent.sessionID];
+      const status = typeof entry === "string" ? entry : entry?.type || entry?.status;
+      let completed = status === "idle";
+      if (!status && Date.now() - agent.startedAt > 1200) {
+        try {
+          const messages = await api(`/session/${encodeURIComponent(agent.sessionID)}/message`, { directory: state.agentBoard.directory || state.currentDirectory });
+          completed = [...messages].reverse().some((message) => message.info?.role === "assistant" && (message.info?.time?.completed || (message.parts || []).some((part) => part.type === "text" && part.text)));
+        } catch {
+          if (!state.sessions.some((session) => session.id === agent.sessionID)) { agent.status = "failed"; agent.error = "The linked session no longer exists."; agent.completedAt = Date.now(); changed = true; }
+        }
+      }
+      if (completed && agent.status === "running") { agent.status = "complete"; agent.activity = "Final handoff is ready in the linked session."; agent.activityType = "Completed"; agent.activityAt = Date.now(); agent.completedAt = Date.now(); changed = true; }
+    }
+    if (changed) { scheduleAgentBoardSave(); renderAgentBoard(); await scheduleReadyBoardAgents(); }
+  }
+
+  function startAgentBoardMonitor() {
+    if (!state.agentBoard.active || state.agentBoardTimer) return;
+    state.agentBoardTimer = setInterval(async () => {
+      try { const statuses = await api("/session/status", { noDirectory: true }); state.statuses = { ...state.statuses, ...statuses }; await reconcileAgentBoardStatuses(statuses); renderSessions(); }
+      catch { /* Live events remain the primary status path. */ }
+    }, 2500);
+  }
+
+  function stopAgentBoardMonitor() { clearInterval(state.agentBoardTimer); state.agentBoardTimer = null; }
+
+  function toggleAgentBoardPause() {
+    if (!state.agentBoard.active) return;
+    state.agentBoard.paused = !state.agentBoard.paused;
+    scheduleAgentBoardSave(); renderAgentBoard();
+    if (!state.agentBoard.paused) scheduleReadyBoardAgents();
+  }
+
+  async function stopAgentBoard() {
+    const running = state.agentBoard.agents.filter((agent) => agent.status === "running" && agent.sessionID);
+    await Promise.all(running.map((agent) => api(`/session/${encodeURIComponent(agent.sessionID)}/abort`, { directory: state.agentBoard.directory || state.currentDirectory, method: "POST" }).catch(() => null)));
+    running.forEach((agent) => { agent.status = "failed"; agent.error = "Stopped by user."; agent.completedAt = Date.now(); });
+    state.agentBoard.active = false; state.agentBoard.paused = false;
+    stopAgentBoardMonitor(); scheduleAgentBoardSave(); renderAgentBoard(); renderSessions();
+    toast("Running board agents were stopped.");
+  }
+
+  async function stopBoardAgent(agentID) {
+    const agent = boardAgent(agentID);
+    if (!agent || agent.status !== "running" || !agent.sessionID) return;
+    try { await api(`/session/${encodeURIComponent(agent.sessionID)}/abort`, { directory: state.agentBoard.directory || state.currentDirectory, method: "POST" }); } catch {}
+    agent.status = "failed"; agent.error = "Stopped by user."; agent.activity = "Stopped. Edit the card or run it again when ready."; agent.activityType = "Stopped"; agent.completedAt = Date.now();
+    scheduleAgentBoardSave(); renderAgentBoard(); renderSessions(); await scheduleReadyBoardAgents();
+  }
+
+  function resetAgentBoard() {
+    if (state.agentBoard.agents.some((agent) => agent.status === "running")) { toast("Stop running agents before resetting the board.", "warn"); return; }
+    if (!confirm("Reset the Agent Board? Linked OpenCode sessions will remain available in Sessions.")) return;
+    state.agentBoard = normalizeAgentBoard({ directory: state.currentDirectory, concurrency: 2, agents: [] });
+    scheduleAgentBoardSave(); renderAgentBoard();
+  }
+
+  function deleteBoardAgent(agentID) {
+    const agent = boardAgent(agentID);
+    if (!agent || agent.status === "running") return;
+    state.agentBoard.agents = state.agentBoard.agents.filter((item) => item.id !== agentID);
+    state.agentBoard.agents.forEach((item) => { item.dependencies = item.dependencies.filter((id) => id !== agentID); });
+    scheduleAgentBoardSave(); renderAgentBoard();
+  }
+
+  async function openBoardSession(agentID) {
+    const agent = boardAgent(agentID);
+    if (!agent?.sessionID) return;
+    els.agentBoardDialog.close();
+    await refreshSessions();
+    await selectSession(agent.sessionID);
   }
 
   async function toggleBrowserWindow() {
@@ -1395,6 +1781,7 @@
   function renderHeader() {
     const session = selectedSession();
     els.sessionHeader.hidden = !session;
+    $("#sendSessionToBoardButton").disabled = !session;
     if (!session) { els.composerStop.hidden = true; els.send.hidden = false; return; }
     els.sessionTitle.textContent = session.title || "Untitled session";
     els.projectEyebrow.textContent = basename(session.directory).toUpperCase();
@@ -1821,7 +2208,7 @@
   }
 
   function renderAll() {
-    renderProjects(); renderSessions(); renderModels(); renderAgents(); renderInspector(); renderHeader(); renderUsage(); renderMessages(); renderComposer(); renderPermissions();
+    renderProjects(); renderSessions(); renderModels(); renderAgents(); renderInspector(); renderHeader(); renderUsage(); renderMessages(); renderComposer(); renderPermissions(); renderAgentBoard(); renderVsCode();
   }
 
   async function refreshMessages(scroll = false) {
@@ -1945,6 +2332,17 @@
     const engineCommand = commandMatch && state.openCodeCommands.find((item) => item.name.toLowerCase() === commandMatch[1].toLowerCase());
     if (engineCommand) return runOpenCodeCommand(engineCommand, commandMatch[2] || "", options);
     clean = await expandSessionReferences(clean);
+    if (state.browserRuntime?.available && !state.browserRuntime.visible && /(?:playw(?:right|rite)|browser|https?:\/\/|(?:open|visit|inspect|test)\s+(?:the\s+)?(?:page|site|website))/i.test(clean)) {
+      try {
+        state.browserRuntime.restarting = true; renderBrowser();
+        state.browserRuntime = await workspace("/workspace/browser-mode", { method: "POST", body: { visible: true, directory: state.currentDirectory } });
+        renderBrowser();
+        toast("Visible Brave enabled for this browser task. The window will appear when Playwright acts.");
+      } catch (error) {
+        state.browserRuntime.restarting = false; renderBrowser();
+        toast(`The task will continue, but the visible browser could not be enabled: ${error.message}`, "warn");
+      }
+    }
     if (state.speechRecognition) state.speechRecognition.stop();
     let session = selectedSession();
     if (!session) session = await newSession(false);
@@ -2125,6 +2523,25 @@
     state.refreshTimer = setTimeout(() => refreshMessages(scroll), 140);
   }
 
+  function updateBoardActivityFromPart(part = {}) {
+    const agent = state.agentBoard.agents.find((item) => item.sessionID === part.sessionID && item.status === "running");
+    if (!agent) return;
+    if (part.type === "reasoning" && part.text) {
+      agent.activityType = "Thinking summary";
+      agent.activity = String(part.text).replace(/\*\*/g, "").trim().slice(0, 220);
+    } else if (part.type === "tool") {
+      const tool = String(part.tool || "tool").replaceAll("_", " ");
+      const status = part.state?.status || "running";
+      agent.activityType = status === "completed" ? "Tool completed" : status === "error" ? "Tool error" : "Using tool";
+      agent.activity = `${tool}${part.state?.title ? ` · ${part.state.title}` : ""}`.slice(0, 220);
+    } else if (part.type === "text" && part.text) {
+      agent.activityType = "Writing handoff";
+      agent.activity = String(part.text).replace(/\s+/g, " ").trim().slice(-220);
+    } else return;
+    agent.activityAt = Date.now();
+    scheduleAgentBoardSave(); renderAgentBoard();
+  }
+
   function connectEvents() {
     state.eventSource?.close();
     if (!state.currentDirectory) return;
@@ -2143,6 +2560,7 @@
         state.statuses[properties.sessionID] = properties.status;
         renderSessions(); renderHeader(); renderMessages(true);
         const nowIdle = sessionStatus(properties.sessionID) === "idle";
+        reconcileAgentBoardStatuses(state.statuses).catch(() => null);
         if (state.conversationMode && state.voiceAwaitingResponse && properties.sessionID === state.currentSessionID && wasWorking && nowIdle) {
           state.voiceAwaitingResponse = false;
           refreshMessages(true).then(speakLatestAssistant).catch(() => scheduleConversationListening(500));
@@ -2159,6 +2577,7 @@
         renderSessions();
       } else if (["message.updated", "message.part.updated", "message.part.removed"].includes(payload.type)) {
         const sessionID = properties.info?.sessionID || properties.part?.sessionID || properties.sessionID;
+        if (payload.type === "message.part.updated" && properties.part) updateBoardActivityFromPart(properties.part);
         if (!sessionID || sessionID === state.currentSessionID) scheduleMessageRefresh(true);
       } else if (payload.type === "permission.asked" || payload.type === "permission.updated") {
         const permission = properties;
@@ -2172,6 +2591,8 @@
         renderPermissions();
       } else if (payload.type === "session.error") {
         let detail = properties.error?.data?.message || properties.error?.message || "The active model returned an error.";
+        const boardWorker = state.agentBoard.agents.find((agent) => agent.sessionID === properties.sessionID && agent.status === "running");
+        if (boardWorker) { boardWorker.status = "failed"; boardWorker.error = detail; boardWorker.completedAt = Date.now(); scheduleAgentBoardSave(); renderAgentBoard(); scheduleReadyBoardAgents(); }
         if (/ProviderModelNotFoundError|Model not found:\s*opencode\/x-preview-f-free/i.test(detail)) detail = "Ox Alpha is not available in this OpenCode engine version. Run the Seneschal updater, fully close the app, and reopen it.";
         const retryableOutage = properties.error?.data?.statusCode === 503 || /endpoint is unavailable|service unavailable/i.test(detail);
         if (retryableOutage && properties.sessionID === state.currentSessionID) {
@@ -2501,6 +2922,7 @@
     setTalkState(state.voiceSpeaking ? "Speaking" : state.voiceAwaitingResponse ? "Thinking" : state.conversationMode ? "Listening" : "");
     renderActiveSkillCount();
     $("#settingsArchives").textContent = `${state.archivedSessions.size} archived`;
+    renderAgentBoard(); renderVsCode();
     els.settingsDialog.showModal();
   }
 
@@ -2660,6 +3082,8 @@
       { icon: "+", title: "New session", subtitle: `Create in ${basename(state.currentDirectory)}`, kind: "Action", run: () => newSession() },
       { icon: "P", title: "Add project", subtitle: "Connect a Windows or WSL folder", kind: "Action", run: openProjectDialog },
       { icon: "B", title: "New browser task", subtitle: "Navigate, inspect, click, type, or screenshot", kind: "Browser", run: openBrowserDialog },
+      { icon: "AB", title: "Open Agent Board", subtitle: "Coordinate specialist sessions with dependency handoffs", kind: "Agents", run: openAgentBoard },
+      { icon: "<>" , title: "Open project in VS Code", subtitle: basename(state.currentDirectory) || "Current project", kind: "Editor", run: () => openVsCode("") },
       { icon: "VO", title: state.conversationMode ? "Stop Talk mode" : "Start Talk mode", subtitle: "Turn-by-turn listening and spoken replies", kind: "Voice", run: toggleConversationMode },
       { icon: "IN", title: "Instructions Studio", subtitle: "Persona, global and project rules, agents, and skills", kind: "Control", run: () => openInstructionStudio("persona") },
       { icon: "/", title: "OpenCode command guide", subtitle: `${state.openCodeCommands.length} commands currently available`, kind: "Control", run: openCommands },
@@ -2740,10 +3164,20 @@
       ]);
       state.health = health; state.path = path; state.sessions = sessions; state.providers = providers;
       els.version.textContent = health.version || "—";
-      const availableDirectories = directories();
+      let availableDirectories = directories();
+      const requestedDirectory = state.launchSelection?.directory;
+      const requestedSessionID = state.launchSelection?.sessionID;
+      if (requestedDirectory && !state.customDirectories.includes(requestedDirectory)) { state.customDirectories.push(requestedDirectory); availableDirectories = directories(); }
+      if (requestedDirectory) state.currentDirectory = requestedDirectory;
       if (!state.currentDirectory || !availableDirectories.includes(state.currentDirectory)) state.currentDirectory = availableDirectories[0] || "";
+      if (requestedSessionID && sessions.some((session) => session.id === requestedSessionID)) state.currentSessionID = requestedSessionID;
       const currentExists = sessions.some((session) => session.id === state.currentSessionID && session.directory === state.currentDirectory);
       if (!currentExists) state.currentSessionID = sessions.filter((session) => session.directory === state.currentDirectory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0]?.id || "";
+      if (state.launchSelection?.directory || state.launchSelection?.sessionID) {
+        state.launchSelection = null;
+        storage.set("atelier-projects", state.customDirectories);
+        history.replaceState({}, "", location.pathname);
+      }
       storage.set("atelier-directory", state.currentDirectory); storage.set("atelier-session", state.currentSessionID);
       await refreshDirectoryData();
       await refreshInstructionData(false);
@@ -2773,6 +3207,8 @@
     $("#refreshButton").addEventListener("click", () => refreshAll(true));
     $("#commandButton").addEventListener("click", openCommands);
     $("#settingsButton").addEventListener("click", openSettings);
+    $("#agentBoardButton").addEventListener("click", openAgentBoard);
+    $("#agentBoardRailButton").addEventListener("click", openAgentBoard);
     $("#settingsRailButton").addEventListener("click", openSettings);
     $("#instructionsRailButton").addEventListener("click", () => openInstructionStudio("persona"));
     $("#chatGPTRailButton").addEventListener("click", openChatGPTSpace);
@@ -2782,6 +3218,8 @@
     $("#settingsMotionButton").addEventListener("click", cycleMotion);
     $("#settingsProvidersButton").addEventListener("click", openProviderSettings);
     $("#settingsBrowserButton").addEventListener("click", openBrowserFromSettings);
+    $("#settingsAgentBoardButton").addEventListener("click", openAgentBoard);
+    $("#settingsVsCodeButton").addEventListener("click", openVsCodeDialog);
     $("#settingsBlenderButton").addEventListener("click", openBlenderFromSettings);
     $("#settingsDeepSeekButton").addEventListener("click", openProviderSettings);
     $("#providerConnectForm").addEventListener("submit", connectProvider);
@@ -2827,6 +3265,26 @@
     $("#settingsClassicButton").addEventListener("click", openClassic);
     $("#backupNowButton").addEventListener("click", backupNow);
     $("#openBlenderButton").addEventListener("click", openBlender);
+    $("#openVsCodeButton").addEventListener("click", openVsCodeDialog);
+    $("#openSessionVsCodeButton").addEventListener("click", () => openVsCode(""));
+    $("#sendSessionToBoardButton").addEventListener("click", importCurrentSessionToBoard);
+    $("#closeAgentBoardButton").addEventListener("click", () => els.agentBoardDialog.close());
+    $("#agentBoardImportButton").addEventListener("click", importCurrentSessionToBoard);
+    $("#agentBoardAddButton").addEventListener("click", () => openAgentEditor());
+    $("#agentBoardTemplateButton").addEventListener("click", createStarterBoard);
+    $("#agentBoardRunButton").addEventListener("click", runAgentBoard);
+    $("#agentBoardPauseButton").addEventListener("click", toggleAgentBoardPause);
+    $("#agentBoardStopButton").addEventListener("click", stopAgentBoard);
+    $("#agentBoardResetButton").addEventListener("click", resetAgentBoard);
+    els.agentBoardObjective.addEventListener("input", () => { state.agentBoard.objective = els.agentBoardObjective.value; scheduleAgentBoardSave(); });
+    els.agentBoardConcurrency.addEventListener("change", () => { state.agentBoard.concurrency = Number(els.agentBoardConcurrency.value) || 2; scheduleAgentBoardSave(); renderAgentBoard(); scheduleReadyBoardAgents(); });
+    els.agentEditorForm.addEventListener("submit", saveAgentEditor);
+    els.agentRole.addEventListener("change", () => { els.agentAccess.value = els.agentRole.value === "build" ? "build" : "read"; });
+    $("#cancelAgentEditorButton").addEventListener("click", () => els.agentEditorDialog.close());
+    els.vscodeForm.addEventListener("submit", (event) => { event.preventDefault(); const resource = els.vscodePath.value.trim(); if (!resource) { els.vscodeError.textContent = "Enter a file path, or use Open project."; els.vscodeError.hidden = false; return; } openVsCode(resource); });
+    $("#openVsCodeProjectButton").addEventListener("click", () => openVsCode(""));
+    $("#installVsCodeCompanionButton").addEventListener("click", installVsCodeCompanion);
+    $("#cancelVsCodeButton").addEventListener("click", () => els.vscodeDialog.close());
     $("#homeButton").addEventListener("click", () => {
       if (innerWidth <= 680) { $(".sidebar").classList.toggle("open"); return; }
       state.currentSessionID = ""; state.messages = []; storage.set("atelier-session", ""); renderAll();
@@ -2906,10 +3364,10 @@
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommands(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newSession(); }
     });
-    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, els.messageEditDialog, els.browserDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
+    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, els.messageEditDialog, els.browserDialog, els.vscodeDialog, els.agentEditorDialog, els.agentBoardDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
     els.instructionDialog.addEventListener("click", (event) => { if (event.target === els.instructionDialog) closeInstructionStudio(); });
     document.addEventListener("visibilitychange", syncMotionState);
-    window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); });
+    window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); stopAgentBoardMonitor(); });
   }
 
   async function init() {

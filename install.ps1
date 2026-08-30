@@ -45,7 +45,7 @@ $openCodePath = Invoke-WslText -WslArguments @('-d', $WslDistribution, '--', 'ba
 if (-not $openCodePath) { throw 'OpenCode is not installed in this WSL distribution. Install it first: https://opencode.ai/docs/' }
 
 New-Item -ItemType Directory -Force -Path $InstallDirectory | Out-Null
-foreach ($folder in @('app', 'config', 'docs', 'scripts', 'tests')) {
+foreach ($folder in @('app', 'config', 'docs', 'extensions', 'scripts', 'tests')) {
   $from = Join-Path $source $folder
   if (Test-Path -LiteralPath $from) {
     $to = Join-Path $InstallDirectory $folder
@@ -172,6 +172,10 @@ if ($migrationVerified) {
     'Seneschal v0.2.1 Beta 5',
     'Seneschal v0.2.1 Beta 6',
     'Seneschal v0.2.1 Beta 7',
+    'Seneschal v0.2.1 Beta 8',
+    'Seneschal v0.2.1 Beta 9',
+    'Seneschal v0.2.1 Beta 10',
+    'Seneschal v0.2.1 Beta 11',
     'seneschal-v0.2.0-beta.1.zip',
     'seneschal-v0.2.1-beta.1.zip',
     'seneschal-v0.2.1-beta.2.zip',
@@ -180,7 +184,10 @@ if ($migrationVerified) {
     'seneschal-v0.2.1-beta.5.zip',
     'seneschal-v0.2.1-beta.6.zip',
     'seneschal-v0.2.1-beta.7.zip',
-    'seneschal-v0.2.1-beta.8.zip'
+    'seneschal-v0.2.1-beta.8.zip',
+    'seneschal-v0.2.1-beta.9.zip',
+    'seneschal-v0.2.1-beta.10.zip',
+    'seneschal-v0.2.1-beta.11.zip'
   )) {
     $obsoletePath = Join-Path $desktop $obsoleteDesktopItem
     if (Test-Path -LiteralPath $obsoletePath) { Remove-Item -Recurse -Force -LiteralPath $obsoletePath }

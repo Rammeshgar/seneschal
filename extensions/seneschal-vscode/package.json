@@ -1,0 +1,28 @@
+{
+  "name": "seneschal-companion",
+  "displayName": "Seneschal Companion",
+  "description": "Open the current VS Code project in Seneschal and choose the session that should receive it.",
+  "version": "0.1.0",
+  "publisher": "rammeshgar",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "extensionKind": ["ui"],
+  "categories": ["Other", "Machine Learning"],
+  "activationEvents": ["onCommand:seneschal.openMenu"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "seneschal.openMenu", "title": "Seneschal: Open Project or Session" },
+      { "command": "seneschal.openProject", "title": "Seneschal: Open Current Project" },
+      { "command": "seneschal.chooseSession", "title": "Seneschal: Share Current Project with Session" },
+      { "command": "seneschal.newSession", "title": "Seneschal: New Session for Current Project" }
+    ]
+  },
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rammeshgar/seneschal"
+  }
+}
