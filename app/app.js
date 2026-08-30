@@ -40,6 +40,7 @@
     pendingDeleteMessageID: "",
     pendingDeleteProject: "",
     selectedModel: storage.get("atelier-model", ""),
+    sessionModels: storage.get("seneschal-session-models", {}),
     selectedAgent: storage.get("atelier-agent", "build"),
     selectedVariants: storage.get("atelier-model-variants", {}),
     motion: storage.get("atelier-motion", "orbit"),
@@ -213,6 +214,19 @@
 
   function selectedSession() { return state.sessions.find((session) => session.id === state.currentSessionID); }
   function selectedModel() { return state.models.find((model) => model.value === state.selectedModel) || state.models[0]; }
+
+  function modelReference(session) {
+    const providerID = session?.model?.providerID;
+    const modelID = session?.model?.id || session?.model?.modelID;
+    return providerID && modelID ? `${providerID}/${modelID}` : "";
+  }
+
+  function rememberSessionModel(value = state.selectedModel) {
+    const session = selectedSession();
+    if (!session || !value) return;
+    state.sessionModels[session.id] = value;
+    storage.set("seneschal-session-models", state.sessionModels);
+  }
 
   function withDirectory(path, directory = state.currentDirectory) {
     if (!directory) return path;
@@ -853,15 +867,19 @@
   function renderModels() {
     state.models = flattenModels();
     const current = selectedSession();
-    const sessionRef = current?.model ? `${current.model.providerID}/${current.model.id || current.model.modelID}` : "";
-    if (!state.models.some((model) => model.value === state.selectedModel)) state.selectedModel = state.models.some((model) => model.value === sessionRef) ? sessionRef : state.models[0]?.value || "";
+    const available = new Set(state.models.map((model) => model.value));
+    const remembered = current ? state.sessionModels[current.id] : "";
+    const sessionRef = modelReference(current);
+    const fallback = storage.get("atelier-model", "");
+    state.selectedModel = [remembered, sessionRef, state.selectedModel, fallback, state.models[0]?.value].find((value) => value && available.has(value)) || "";
+    if (current && state.selectedModel && state.sessionModels[current.id] !== state.selectedModel) rememberSessionModel();
     const groups = new Map();
     state.models.forEach((model) => {
       if (!groups.has(model.providerName)) groups.set(model.providerName, []);
       groups.get(model.providerName).push(model);
     });
     els.model.innerHTML = [...groups.entries()].map(([provider, models]) => `<optgroup label="${escapeHTML(provider)}">${models.map((model) => `<option value="${escapeHTML(model.value)}"${model.value === state.selectedModel ? " selected" : ""}>${escapeHTML(model.name)}</option>`).join("")}</optgroup>`).join("");
-    storage.set("atelier-model", state.selectedModel);
+    if (!current) storage.set("atelier-model", state.selectedModel);
     renderModelCapability();
     renderModelVariants();
   }
@@ -1864,6 +1882,8 @@
 
   async function selectSession(id) {
     if (!id || id === state.currentSessionID) return;
+    const previous = selectedSession();
+    const previousStillRunning = previous && ["busy", "retry"].includes(sessionStatus(previous.id));
     state.currentSessionID = id;
     storage.set("atelier-session", id);
     const session = selectedSession();
@@ -1877,6 +1897,7 @@
     state.userScrolledAway = false;
     renderAll();
     await refreshMessages(true);
+    if (previousStillRunning) toast(`${previous.title || "Previous session"} is still running in the background.`);
   }
 
   async function newSession(focus = true) {
@@ -2662,7 +2683,7 @@
       { icon: "S", title: session.title || "Untitled session", subtitle: `Open · ${basename(session.directory)}`, kind: "Session", run: () => selectSession(session.id) },
       { icon: "@", title: `Reference: ${session.title || "Untitled session"}`, subtitle: "Bring this conversation into the current prompt", kind: "Reference", run: () => insertSessionReference(session) }
     ]));
-    const models = state.models.map((model) => ({ icon: "M", title: model.name, subtitle: model.providerName, kind: "Model", run: () => { state.selectedModel = model.value; els.model.value = model.value; storage.set("atelier-model", model.value); renderModelCapability(); renderUsage(); } }));
+    const models = state.models.map((model) => ({ icon: "M", title: model.name, subtitle: `${model.providerName} · current session only`, kind: "Model", run: () => { state.selectedModel = model.value; els.model.value = model.value; rememberSessionModel(); renderModelCapability(); renderModelVariants(); renderUsage(); } }));
     return [...base, ...engineCommands, ...sessions, ...models];
   }
 
@@ -2810,7 +2831,7 @@
       if (innerWidth <= 680) { $(".sidebar").classList.toggle("open"); return; }
       state.currentSessionID = ""; state.messages = []; storage.set("atelier-session", ""); renderAll();
     });
-    els.model.addEventListener("change", () => { state.selectedModel = els.model.value; storage.set("atelier-model", state.selectedModel); renderModelCapability(); renderModelVariants(); renderUsage(); const model = selectedModel(); if (model?.providerID === "opencode" && model.id === "deepseek-v4-flash-free") toast("DeepSeek V4 Flash Free is currently returning provider outages. Seneschal will stop repeated 503 retries.", "warn"); });
+    els.model.addEventListener("change", () => { state.selectedModel = els.model.value; if (selectedSession()) rememberSessionModel(); else storage.set("atelier-model", state.selectedModel); renderModelCapability(); renderModelVariants(); renderUsage(); const model = selectedModel(); if (model?.providerID === "opencode" && model.id === "deepseek-v4-flash-free") toast("DeepSeek V4 Flash Free is currently returning provider outages. Seneschal will stop repeated 503 retries.", "warn"); });
     els.modelVariant.addEventListener("change", () => { const model = selectedModel(); if (!model) return; state.selectedVariants[model.value] = els.modelVariant.value; storage.set("atelier-model-variants", state.selectedVariants); });
     els.agent.addEventListener("change", () => { state.selectedAgent = els.agent.value; storage.set("atelier-agent", state.selectedAgent); els.inspectorAgent.textContent = agentDisplayName(state.selectedAgent); renderInspector(); renderInstructionStack(); renderModelCapability(); if (state.selectedAgent === "chat") toast("Chat mode enabled. All tools and system actions are off."); });
     els.form.addEventListener("submit", (event) => { event.preventDefault(); sendPrompt(els.prompt.value); });

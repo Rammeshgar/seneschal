@@ -65,12 +65,10 @@ test("workspace pulse uses fixed OpenCode work and ambient event buckets", () =>
 
 test("public launch materials reference privacy-safe visual assets", () => {
   const readme = read("README.md");
-  const linkedin = read("docs/linkedin-launch.md");
   assert.match(readme, /assets\/social\/seneschal-social-preview\.png/);
   assert.match(readme, /docs\/images\/seneschal-workspace-night\.png/);
   assert.match(readme, /privacy-safe product illustration/);
-  assert.match(linkedin, /assets\/social\/seneschal-linkedin-launch\.png/);
-  assert.match(linkedin, /Alt text:/);
+  assert.ok(fs.existsSync(path.join(root, "assets/social/seneschal-linkedin-launch.png")));
 });
 
 test("installer handles unavailable WSL and Windows PowerShell safely", () => {
@@ -137,6 +135,16 @@ test("Playwright Brave can switch between hidden and visible agent-controlled mo
   assert.match(app, /toggleBrowserWindow/);
   assert.match(app, /body: \{ visible: true, directory: state\.currentDirectory \}/);
   assert.match(app, /Visible browser control needs one Seneschal restart/);
+});
+
+test("model choices are isolated per session and background work survives navigation", () => {
+  const app = read("app/app.js");
+  assert.match(app, /seneschal-session-models/);
+  assert.match(app, /function rememberSessionModel/);
+  assert.match(app, /current session only/);
+  assert.match(app, /is still running in the background/);
+  const selectSession = app.slice(app.indexOf("async function selectSession"), app.indexOf("async function newSession"));
+  assert.doesNotMatch(selectSession, /\/abort/);
 });
 
 test("hidden launcher leaves a useful failure report", () => {

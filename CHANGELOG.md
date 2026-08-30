@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1-beta.10 — 2026-08-30
+
+- Keeps each session's selected model independent instead of changing every session
+- Makes session switching explicitly preserve and report work continuing in the background
+- Labels command-palette model changes as applying to the current session only
+
 ## 0.2.1-beta.9 — 2026-08-29
 
 - Adds confirmed Delete controls to normal, pinned, and archived session rows

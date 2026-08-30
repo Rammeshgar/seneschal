@@ -4,7 +4,7 @@
 
 ![Seneschal — one calm workspace for models, tools, and control](assets/social/seneschal-social-preview.png)
 
-Seneschal gives OpenCode a focused, personal interface on Windows and WSL: model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, pinned and archived messages, attachments, voice input, optional browser and Blender status, and a matte day/night visual system.
+Seneschal gives OpenCode a focused, personal interface on Windows and WSL: per-session model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, pinned and archived messages, attachments, voice input, optional browser and Blender status, and a matte day/night visual system.
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
 
