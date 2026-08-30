@@ -130,7 +130,9 @@ test("Playwright Brave can switch between hidden and visible agent-controlled mo
   assert.match(launcher, /%DISPLAY_MODE% --isolated/);
   assert.match(server, /\/workspace\/browser-mode/);
   assert.match(server, /restartPlaywrightBridge/);
-  assert.match(server, /\/instance\/dispose/);
+  assert.match(server, /\/mcp\/playwright\/\$\{action\}/);
+  assert.match(server, /configuredLauncher/);
+  assert.doesNotMatch(server, /\/instance\/dispose/);
   assert.match(server, /body\.directory \|\| launchDirectory/);
   assert.match(app, /toggleBrowserWindow/);
   assert.match(app, /body: \{ visible: true, directory: state\.currentDirectory \}/);

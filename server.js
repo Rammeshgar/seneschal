@@ -601,11 +601,19 @@ function usageEstimate(callback) {
 
 function browserRuntimeInfo() {
   const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  let configuredLauncher = "";
+  try {
+    const config = JSON.parse(fs.readFileSync(openCodeConfigFile, "utf8"));
+    const command = config.mcp?.playwright?.command;
+    const configured = Array.isArray(command) ? command.findLast((item) => /start-playwright-mcp\.cmd$/i.test(String(item))) : "";
+    if (configured) configuredLauncher = String(configured).replace(/^\/mnt\/([a-z])\//i, (_, drive) => `${drive.toUpperCase()}:\\`).replaceAll("/", "\\");
+  } catch { configuredLauncher = ""; }
   const launchers = [
-    path.join(installDirectory, "browser-runtime", "start-playwright-mcp.cmd"),
+    configuredLauncher,
     path.join(localAppData, "Seneschal", "browser-runtime", "start-playwright-mcp.cmd"),
+    path.join(installDirectory, "browser-runtime", "start-playwright-mcp.cmd"),
     path.join(localAppData, "OpenCodeAtelier", "browser-runtime", "start-playwright-mcp.cmd")
-  ];
+  ].filter(Boolean);
   const launcher = launchers.find((candidate) => fs.existsSync(candidate) && fs.existsSync(path.join(path.dirname(candidate), "node_modules", ".bin", "playwright-mcp.cmd"))) || "";
   const runtimeRoot = launcher ? path.dirname(path.dirname(launcher)) : installDirectory;
   const flag = path.join(runtimeRoot, "data", "playwright-visible.flag");
@@ -614,24 +622,30 @@ function browserRuntimeInfo() {
 
 function restartPlaywrightBridge(directory, callback) {
   const query = new URLSearchParams({ directory: directory || launchDirectory }).toString();
-  const request = http.request({
-    hostname: host,
-    port: upstreamPort,
-    path: `/instance/dispose?${query}`,
-    method: "POST",
-    timeout: 4000,
-    headers: { authorization: upstreamAuthorization, accept: "application/json" }
-  }, (response) => {
-    let payload = "";
-    response.on("data", (chunk) => { payload += chunk; });
-    response.on("end", () => {
-      if (response.statusCode >= 200 && response.statusCode < 300) return callback(null, true);
-      callback(new Error(payload || `OpenCode could not restart the browser bridge (${response.statusCode}).`));
+  const changeConnection = (action, done) => {
+    const request = http.request({
+      hostname: host,
+      port: upstreamPort,
+      path: `/mcp/playwright/${action}?${query}`,
+      method: "POST",
+      timeout: 10000,
+      headers: { authorization: upstreamAuthorization, accept: "application/json" }
+    }, (response) => {
+      let payload = "";
+      response.on("data", (chunk) => { payload += chunk; });
+      response.on("end", () => {
+        if (response.statusCode >= 200 && response.statusCode < 300) return done(null);
+        done(new Error(payload || `OpenCode could not ${action} the Playwright bridge (${response.statusCode}).`));
+      });
     });
+    request.once("timeout", () => request.destroy(new Error(`OpenCode took too long to ${action} the Playwright bridge.`)));
+    request.once("error", done);
+    request.end();
+  };
+  changeConnection("disconnect", (disconnectError) => {
+    if (disconnectError) return callback(disconnectError);
+    changeConnection("connect", (connectError) => callback(connectError, !connectError));
   });
-  request.once("timeout", () => request.destroy(new Error("OpenCode took too long to restart the browser bridge.")));
-  request.once("error", callback);
-  request.end();
 }
 
 function handleWorkspaceEndpoint(request, response, pathname) {
