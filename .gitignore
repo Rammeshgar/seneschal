@@ -3,6 +3,8 @@ node_modules/
 artifacts/
 browser-runtime/
 dist/
+obsolete-seneschal-material/
+*-clean.zip
 *.log
 *.backup
 *.before-*
