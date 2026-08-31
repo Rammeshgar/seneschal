@@ -42,18 +42,8 @@
           <button class="icon-button board-launch-button" id="agentBoardButton" title="Open Agent Board" aria-label="Open Agent Board">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="15" width="7" height="6" rx="1"/><path d="M6.5 10v2.5H12V15m5.5-5v2.5H12"/></svg>
           </button>
-          <button class="icon-button panel-toggle" id="leftPanelToggle" title="Minimize left panel" aria-label="Minimize left projects and sessions panel" aria-pressed="false">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M6.5 9.5 4 12l2.5 2.5"/></svg>
-          </button>
-          <button class="icon-button panel-toggle" id="rightPanelToggle" title="Minimize right panel" aria-label="Minimize right agent context panel" aria-pressed="false">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16m2.5-10.5L20 12l-2.5 2.5"/></svg>
-          </button>
           <button class="icon-button" id="refreshButton" title="Refresh workspace" aria-label="Refresh workspace">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M18.1 15A7 7 0 1 1 17 6.1L20 9"/></svg>
-          </button>
-          <button class="motion-switch" id="motionSwitch" aria-label="Switch welcome animation" title="Switch welcome animation">
-            <span class="pixel-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-            <span id="motionLabel">Orbit</span>
           </button>
           <button class="theme-switch" id="themeSwitch" aria-label="Switch color theme" title="Switch day or night theme">
             <span class="theme-track"><i class="sun">☼</i><i class="moon">◒</i><b></b></span>
@@ -69,11 +59,11 @@
       </button>
 
       <aside class="sidebar">
-        <button class="new-session primary-button" id="newSessionButton">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          <span>New session</span>
-          <kbd>Ctrl N</kbd>
-        </button>
+        <div class="sidebar-head-controls"><button class="new-session primary-button" id="newSessionButton">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span>New session</span>
+            <kbd>Ctrl N</kbd>
+          </button><button class="icon-button panel-toggle" id="leftPanelToggle" title="Minimize left panel" aria-label="Minimize left projects and sessions panel" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M6.5 9.5 4 12l2.5 2.5"/></svg></button></div>
 
         <div class="side-scroll">
           <section class="rail-section" id="projectsRailSection">
@@ -93,7 +83,9 @@
         </div>
 
         <div class="sidebar-footer">
+          <button class="motion-switch" id="motionSwitch" aria-label="Switch welcome animation" title="Switch welcome animation"><span class="pixel-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="motionLabel">Orbit</span></button>
           <button class="rail-link agent-board-rail-link" id="agentBoardRailButton"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="15" width="7" height="6" rx="1"/><path d="M6.5 10v2.5H12V15m5.5-5v2.5H12"/></svg><span>Agent Board</span><small id="agentBoardRailCount">0</small></button>
+          <button class="rail-link board-history-rail-link" id="agentBoardHistoryRailButton"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v4H3zM8 12h8M8 16h5"/></svg><span>Board history</span><small id="agentBoardHistoryRailCount">0</small></button>
           <button class="rail-link" id="instructionsRailButton"><svg viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/></svg>Instructions</button>
           <button class="rail-link chatgpt-rail-link" id="chatGPTRailButton"><span class="chatgpt-mini-mark" aria-hidden="true">C</span><span>ChatGPT Chat</span><small>CHAT</small></button>
           <div class="usage-card">
@@ -186,7 +178,7 @@
         <aside class="inspector" id="inspector">
           <section class="inspector-head">
             <div><span class="eyebrow">AGENT CONTEXT</span><strong id="inspectorAgent">Build</strong></div>
-            <button class="icon-button mobile-inspector-close" id="closeInspectorButton" aria-label="Close inspector">×</button>
+            <span class="inspector-head-actions"><button class="icon-button panel-toggle" id="rightPanelToggle" title="Minimize right panel" aria-label="Minimize right agent context panel" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16m2.5-10.5L20 12l-2.5 2.5"/></svg></button><button class="icon-button mobile-inspector-close" id="closeInspectorButton" aria-label="Close inspector">×</button></span>
           </section>
 
           <section class="inspector-block">
@@ -488,8 +480,9 @@
         </header>
         <section class="agent-board-toolbar">
           <label class="board-objective"><span>Project objective</span><input id="agentBoardObjective" placeholder="What should this team deliver?" /></label>
-          <label class="board-concurrency"><span>Parallel agents</span><select id="agentBoardConcurrency" aria-label="Maximum parallel agents"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+          <label class="board-concurrency"><span>Parallel agents</span><select id="agentBoardConcurrency" aria-label="Maximum parallel agents"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
           <button type="button" class="secondary-button" id="agentBoardImportButton">Import session</button>
+          <button type="button" class="secondary-button" id="agentBoardHistoryButton">Board history</button>
           <button type="button" class="secondary-button" id="agentBoardTemplateButton">Starter team</button>
           <button type="button" class="secondary-button" id="agentBoardAddButton">Add agent</button>
           <button type="button" class="primary-button" id="agentBoardRunButton">Run board</button>
@@ -497,12 +490,19 @@
         </section>
         <div class="agent-board-notice"><i></i><span>Each card is a real session. Models and access are chosen per agent. You see provider-supplied summaries and tool activity—not private chain-of-thought.</span></div>
         <section class="agent-board-guide" id="agentBoardGuide">
-          <div><b>1</b><span><strong>Bring the brief</strong><small>Import your current planning session, or type an objective above.</small></span></div>
-          <div><b>2</b><span><strong>Build the team</strong><small>Use Starter team, then edit each model, access profile, task, and dependency.</small></span></div>
-          <div><b>3</b><span><strong>Run and supervise</strong><small>Approve actions in Seneschal. Open any card for its full transcript and live steps.</small></span></div>
+          <div><b>1</b><span><strong>Send one plan</strong><small>Use “To board” on a planning response. Seneschal reads only that chosen message.</small></span></div>
+          <div><b>2</b><span><strong>Review the generated team</strong><small>An architect proposes the roles, tasks, models, access, dependencies, and parallel work.</small></span></div>
+          <div><b>3</b><span><strong>Run and supervise</strong><small>Agents exchange visible requests. The Supervisor can return weak work for another pass.</small></span></div>
         </section>
         <main class="agent-board-columns" id="agentBoardColumns"></main>
         <footer class="agent-board-footer"><span id="agentBoardSummary">No agents yet.</span><div><button type="button" class="danger-text-button" id="agentBoardResetButton">Reset board</button><button type="button" class="secondary-button" id="agentBoardStopButton">Stop running agents</button></div></footer>
+      </div>
+    </dialog>
+
+    <dialog class="modal board-history-modal" id="agentBoardHistoryDialog">
+      <div class="board-history-shell">
+        <header><div><div class="modal-kicker">SAVED WORKFLOWS</div><h2>Board history</h2><p>Boards are separate from ordinary sessions. Open a saved board exactly as it was—no plan is resent and the Board Architect does not redesign it.</p></div><button type="button" class="icon-button" id="closeAgentBoardHistoryButton" aria-label="Close board history">×</button></header>
+        <div class="board-history-list" id="agentBoardHistoryList"><div class="board-history-empty">No saved boards yet.</div></div>
       </div>
     </dialog>
 

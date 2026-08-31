@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.1-beta.15 — 2026-08-31
+
+- Separate Agent Board history and its internal worker sessions from ordinary Sessions, pinned Sessions, archives, project counts, and command search.
+- Add a dedicated **Board history** entry in the left sidebar with a saved-board count.
+- Replace the ambiguous restore flow with **Open board**, which loads the exact saved team without resending its plan or running the Board Architect again.
+- Keep the background-animation control in the sidebar and Settings so the top navigation remains focused on primary work controls.
+
+## 0.2.1-beta.14 — 2026-08-31
+
+- Generate an Agent Board from one selected plan response with automatic roles, tasks, dependencies, access, and concurrency.
+- Add visible agent-to-agent correction requests, supervisor-led acceptance and rework, and bounded retry passes.
+- Add local Agent Board history with restore and safe record deletion.
+- Repair stale Playwright launchers at startup and foreground the visible agent-controlled browser window.
+- Move panel controls into their sidebars, minimize right-side sections independently, and simplify the top navigation.
+
+## 0.2.1-beta.13 — 2026-08-30
+
+- Upgrades the optional VS Code companion from a project launcher into a full in-editor Seneschal workspace
+- Adds connected-provider model selection, project session selection and creation, and session-specific model memory inside VS Code
+- Adds Plan and Build modes, explicit current-selection or current-file context, response and tool-activity history, stop, approval notices, full-session opening, and Source Control review
+- Keeps the Seneschal panel independent from GitHub Copilot: provider accounts and models remain controlled by Seneschal/OpenCode
+- Refreshes the local authenticated VS Code connection whenever Seneschal starts, so the installed panel also works when VS Code is launched directly
+- Adds a local-only companion fallback for upgraded installations whose older elevated Seneschal process has not restarted yet
+- Packages the Activity Bar icon, webview UI, and updated companion documentation in the release installer
+
 ## 0.2.1-beta.12 — 2026-08-30
 
 - Repairs legacy Playwright launchers that were permanently hard-coded to hidden mode, then reconnects only Playwright so other sessions keep running

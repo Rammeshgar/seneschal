@@ -135,6 +135,9 @@ test("Playwright Brave can switch between hidden and visible agent-controlled mo
   assert.match(server, /configuredLauncher/);
   assert.match(server, /ensureVisibilityAwareBrowserLauncher/);
   assert.match(server, /legacy-headless-backup/);
+  assert.match(server, /repairBrowserRuntime/);
+  assert.match(server, /\/workspace\/browser-focus/);
+  assert.match(server, /SetForegroundWindow/);
   assert.doesNotMatch(server, /\/instance\/dispose/);
   assert.match(server, /body\.directory \|\| launchDirectory/);
   assert.match(app, /toggleBrowserWindow/);
@@ -172,6 +175,23 @@ test("Agent Board coordinates real sessions with persistent dependency handoffs"
   assert.match(html, /agentBoardImportButton/);
   assert.match(html, /agentAccessInput/);
   assert.match(app, /importCurrentSessionToBoard/);
+  assert.match(app, /createBoardFromMessage/);
+  assert.match(app, /Board Architect/);
+  assert.match(app, /message-board-button/);
+  assert.match(app, /processBoardRequests/);
+  assert.match(app, /board-request/);
+  assert.match(app, /releaseWaitingBoardAgents/);
+  assert.match(html, /agentBoardHistoryButton/);
+  assert.match(html, /agentBoardHistoryRailButton/);
+  assert.match(html, /agentBoardHistoryDialog/);
+  assert.match(html, /Open a saved board exactly as it was/);
+  assert.match(app, /function isBoardSession/);
+  assert.match(app, /function ordinarySessions/);
+  assert.match(app, /data-board-open-history/);
+  assert.match(app, /openSavedAgentBoard/);
+  assert.match(app, /The plan was not resent or redesigned/);
+  assert.match(server, /agent-board-history/);
+  assert.match(server, /\/workspace\/agent-board\/history/);
   assert.match(app, /updateBoardActivityFromPart/);
   assert.match(app, /stopBoardAgent/);
   assert.match(app, /Conversation only/);
@@ -181,7 +201,21 @@ test("Agent Board coordinates real sessions with persistent dependency handoffs"
   assert.match(server, /\/workspace\/agent-board/);
 });
 
-test("Visual Studio Code bridge opens WSL projects and exact file locations", () => {
+test("sidebars keep their own controls and independently minimized sections", () => {
+  const html = read("app/index.html");
+  const app = read("app/app.js");
+  const styles = read("app/styles.css");
+  const topActions = html.slice(html.indexOf('<div class="top-actions">'), html.indexOf('</div>', html.indexOf('<div class="top-actions">')));
+  assert.doesNotMatch(topActions, /leftPanelToggle|rightPanelToggle|motionSwitch/);
+  assert.match(html, /sidebar-head-controls[\s\S]*leftPanelToggle/);
+  assert.match(html, /inspector-head-actions[\s\S]*rightPanelToggle/);
+  assert.match(app, /seneschal-rail-sections-v2/);
+  assert.match(app, /inspectorSections/);
+  assert.match(app, /syncInspectorSections/);
+  assert.match(styles, /inspector-block\.collapsed/);
+});
+
+test("Visual Studio Code bridge opens WSL projects and provides an in-editor AI workspace", () => {
   const html = read("app/index.html");
   const app = read("app/app.js");
   const server = read("server.js");
@@ -195,10 +229,44 @@ test("Visual Studio Code bridge opens WSL projects and exact file locations", ()
   assert.match(html, /installVsCodeCompanionButton/);
   assert.match(server, /installVsCodeCompanion/);
   assert.match(server, /vscode-connection\.json/);
+  assert.match(server, /function refreshVsCodeConnection/);
+  assert.match(server, /openWorkspace\(\)[\s\S]*refreshVsCodeConnection/);
   const extension = read("extensions/seneschal-vscode/extension.js");
-  assert.match(read("extensions/seneschal-vscode/package.json"), /Seneschal: Open Project or Session/);
-  assert.match(extension, /Choose a Seneschal session/);
+  const manifest = read("extensions/seneschal-vscode/package.json");
+  assert.match(manifest, /seneschal\.workspace/);
+  assert.match(manifest, /Seneschal: Open AI Workspace/);
+  assert.match(extension, /registerWebviewViewProvider/);
+  assert.match(extension, /\/api\/provider/);
+  assert.match(extension, /prompt_async/);
+  assert.match(extension, /agent: this\.mode/);
+  assert.match(extension, /editor-context/);
+  assert.match(extension, /sessionModels/);
+  assert.match(extension, /path\.join\(__dirname, "connection\.json"\)/);
   assert.match(extension, /atelier_session/);
+  for (const file of ["media/panel.js", "media/panel.css", "media/seneschal.svg"]) {
+    assert.equal(fs.existsSync(path.join(root, "extensions/seneschal-vscode", file)), true, `${file} is missing`);
+  }
+});
+
+test("VS Code companion keeps connected text models and readable message activity", () => {
+  const Module = require("node:module");
+  const originalLoad = Module._load;
+  Module._load = function(request, parent, isMain) {
+    if (request === "vscode") return {};
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  let companion;
+  try { companion = require(path.join(root, "extensions/seneschal-vscode/extension.js")); }
+  finally { Module._load = originalLoad; }
+  const models = companion.providerModels({
+    connected: ["connected"],
+    all: [
+      { id: "connected", name: "Connected", models: { text: { id: "text", name: "Text", capabilities: { input: { text: true } } } } },
+      { id: "offline", name: "Offline", models: { hidden: { id: "hidden", name: "Hidden" } } }
+    ]
+  });
+  assert.deepEqual(models.map((model) => model.value), ["connected/text"]);
+  assert.deepEqual(companion.historyFromMessages([{ info: { id: "a", role: "assistant", modelID: "text" }, parts: [{ type: "text", text: "Ready" }, { type: "tool", tool: "edit", state: { status: "completed" } }] }])[0].blocks, ["Ready", "Tool · edit · completed"]);
 });
 
 test("hidden launcher leaves a useful failure report", () => {

@@ -15,8 +15,8 @@ This is a public beta. It is useful today, but it is not a replacement for under
 - A Windows launcher for an OpenCode installation inside WSL
 - A visual editor for persona, general instructions, project instructions, roles, and reusable skills
 - A permission-oriented workspace where Plan is read-only and Build asks before changes by default
-- A persistent Agent Board that can turn an existing planning session into a shared brief, then coordinate model-specific workers through explicit dependencies and a configurable supervisor
-- A local VS Code bridge plus an optional companion button for opening the current WSL project, choosing one of its Seneschal sessions, or creating a new one
+- A persistent Agent Board that can turn one selected plan response into an automatically designed team, then coordinate model-specific workers through explicit dependencies, visible rework requests, and a responsible supervisor
+- A local VS Code bridge plus an optional in-editor Seneschal panel with project sessions, connected models, Plan/Build modes, explicit code context, tool activity, and edit review
 
 It is not an AI model, a provider subscription, or a way around provider usage limits.
 
@@ -30,9 +30,9 @@ The image above is a privacy-safe product illustration based on the real interfa
 
 ![Privacy-safe screenshot of the Seneschal Agent Board](docs/images/seneschal-agent-board-night.png)
 
-Every board card is a real OpenCode session with its own model, role, access profile, status, and retained transcript. Import the current planning session to use its conversation as the project's source brief, then add the Starter team or build a custom team. Agents can run in parallel up to the chosen concurrency limit. A downstream agent starts only after all selected dependencies complete and receives their output as a labelled handoff.
+Every board card is a real OpenCode session with its own model, role, access profile, status, and retained transcript. Use **To board** on one assistant plan response and a Board Architect will propose the team size, roles, tasks, access, dependencies, and parallel-work limit from only that selected message. You can still import a full planning session, use the Starter team, or build a custom team. Up to eight agents can run in parallel. A downstream agent starts only after all selected dependencies complete and receives their output as a labelled handoff.
 
-Each card can be stopped, edited, retried, or opened as a normal retained session. The Supervisor is not a special hidden process: it is a configurable board agent, can use any connected model, and should depend on every worker it must check. Seneschal shows provider-supplied reasoning summaries, tool activity, and final handoffs; private chain-of-thought is not exposed.
+Each card can be stopped, edited, retried, or opened as a retained board session. Board Architect and worker sessions stay out of the ordinary Sessions, pinned Sessions, archive manager, project counts, and command search, so multi-agent operations do not clutter normal conversations. Agents can send explicit, visible correction requests to one another; requested agents run another pass and the requester rechecks the result, with an iteration limit to prevent loops. The Supervisor is not a special hidden process: it is a configurable board agent, can use any connected model, owns final acceptance, and depends on every worker it must check. Seneschal shows provider-supplied reasoning summaries, tool activity, requests, and final handoffs; private chain-of-thought is not exposed. Boards are saved locally in `data/agent-board-history/`. Open them from the separate **Board history** view to load the exact saved team without resending the plan or running the Board Architect again; linked sessions and project files are preserved.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ Each card can be stopped, edited, retried, or opened as a normal retained sessio
 - OpenCode installed and working inside that WSL distribution
 - At least one model provider connected through OpenCode
 
-Brave is preferred when installed. Otherwise, Seneschal opens in the Windows default browser. When the Playwright integration is installed, its Browser control can switch the separate agent-controlled Brave window between hidden and visible mode. Explicit browser requests automatically enable visible mode before the task starts, and beta 12 repairs older launchers that ignored this setting. VS Code is detected locally and opens WSL folders through the installed Remote WSL support. Blender and browser automation remain optional and require their own local integrations.
+Brave is preferred when installed. Otherwise, Seneschal opens in the Windows default browser. When the Playwright integration is installed, its Browser control can switch the separate agent-controlled Brave window between hidden and visible mode. Explicit browser requests automatically enable visible mode before the task starts, Seneschal repairs older launchers at startup, and it brings the real Playwright window forward when it appears. VS Code is detected locally and opens WSL folders through the installed Remote WSL support. Blender and browser automation remain optional and require their own local integrations.
 
 ## Install
 
@@ -76,8 +76,8 @@ Read [SECURITY.md](SECURITY.md) before exposing or modifying the local server.
 
 ## Integrations
 
-- **Agent Board:** built in; import the current planning session, choose each worker's model/access/dependencies, run or stop cards independently, and keep every linked session.
-- **Visual Studio Code:** built in when `Code.exe` is detected; open the project from the header/inspector or install the optional companion for a Seneschal status-bar button inside VS Code.
+- **Agent Board:** built in; send one plan response to automatically design a team, or import the full current session. Choose each worker's model/access/dependencies, run or stop cards independently, review visible rework requests, restore saved boards, and keep every linked session.
+- **Visual Studio Code:** built in when `Code.exe` is detected. The optional local companion adds a Seneschal Activity Bar panel with per-session model selection, Plan/Build modes, current selection/file context, response and tool activity, stop, full-session opening, and Source Control review. It remains separate from GitHub Copilot.
 - **Playwright Brave:** optional MCP integration; tasks can run hidden or in a visible agent-controlled window.
 - **Blender:** optional MCP integration with local bridge status and launch control.
 
@@ -105,8 +105,8 @@ The Blender entry is optional; common installed versions are detected automatica
 - Provider model lists and capabilities are controlled by OpenCode and the provider
 - Full private model reasoning is not exposed; the UI can show provider-supplied summaries and live tool activity
 - Browser and Blender bridges must be installed separately; Seneschal can repair its older hidden-only Playwright launcher but cannot create a missing Playwright installation
-- Agent Board handoffs use completed textual outputs; files remain shared through the selected project folder
-- The VS Code companion links a project to Seneschal sessions; it is not an inline completion engine or a replacement for Copilot-style editor intelligence
+- Agent Board handoffs and correction requests use completed textual outputs; files remain shared through the selected project folder, and automatic rework is limited to prevent loops
+- The VS Code companion provides chat and agent-driven editing but does not replace inline autocomplete or GitHub Copilot's proprietary UI
 - The local cost figure is informational, not a guaranteed cap
 
 ## Development

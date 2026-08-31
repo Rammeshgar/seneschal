@@ -1,8 +1,8 @@
 {
   "name": "seneschal-companion",
   "displayName": "Seneschal Companion",
-  "description": "Open the current VS Code project in Seneschal and choose the session that should receive it.",
-  "version": "0.1.0",
+  "description": "Use Seneschal sessions and connected AI models directly inside Visual Studio Code.",
+  "version": "0.2.1",
   "publisher": "rammeshgar",
   "license": "MIT",
   "engines": {
@@ -10,10 +10,21 @@
   },
   "extensionKind": ["ui"],
   "categories": ["Other", "Machine Learning"],
-  "activationEvents": ["onCommand:seneschal.openMenu"],
+  "activationEvents": ["onView:seneschal.workspace", "onCommand:seneschal.openMenu"],
   "main": "./extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "seneschal", "title": "Seneschal", "icon": "media/seneschal.svg" }
+      ]
+    },
+    "views": {
+      "seneschal": [
+        { "id": "seneschal.workspace", "name": "AI Workspace", "type": "webview" }
+      ]
+    },
     "commands": [
+      { "command": "seneschal.openPanel", "title": "Seneschal: Open AI Workspace" },
       { "command": "seneschal.openMenu", "title": "Seneschal: Open Project or Session" },
       { "command": "seneschal.openProject", "title": "Seneschal: Open Current Project" },
       { "command": "seneschal.chooseSession", "title": "Seneschal: Share Current Project with Session" },

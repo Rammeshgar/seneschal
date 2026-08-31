@@ -1,0 +1,39 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); font: 13px/1.45 var(--vscode-font-family); }
+button, select, textarea { color: inherit; font: inherit; }
+button { cursor: pointer; }
+header { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; padding: 14px 12px 10px; border-bottom: 1px solid var(--vscode-widget-border); }
+header .eyebrow { grid-column: 1 / -1; color: var(--vscode-textLink-foreground); font: 700 10px/1 var(--vscode-editor-font-family); letter-spacing: .18em; }
+header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#refresh, #newSession { width: 30px; border: 1px solid var(--vscode-button-border, var(--vscode-widget-border)); border-radius: 6px; background: var(--vscode-button-secondaryBackground); }
+.selectors { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px 12px 6px; }
+.selectors label { grid-column: 1; color: var(--vscode-descriptionForeground); font: 700 9px/1.2 var(--vscode-editor-font-family); letter-spacing: .12em; }
+.selectors label:nth-of-type(2) { grid-column: 1 / -1; }
+select { display: block; width: 100%; margin-top: 5px; padding: 7px 8px; border: 1px solid var(--vscode-dropdown-border); border-radius: 5px; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); }
+#newSession { grid-column: 2; grid-row: 1; align-self: end; height: 31px; }
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px 12px 10px; }
+.modes button, .context button, .actions button { padding: 6px 9px; border: 1px solid var(--vscode-button-border, var(--vscode-widget-border)); border-radius: 5px; background: var(--vscode-button-secondaryBackground); }
+.modes button.active, .context button.active { border-color: var(--vscode-focusBorder); color: var(--vscode-textLink-foreground); box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
+#notice { margin: 0 12px 8px; padding: 8px; border: 1px solid var(--vscode-widget-border); border-radius: 5px; color: var(--vscode-descriptionForeground); }
+#notice.error { border-color: var(--vscode-errorForeground); color: var(--vscode-errorForeground); }
+#notice.approval { border-color: var(--vscode-editorWarning-foreground); color: var(--vscode-editorWarning-foreground); }
+main { height: min(48vh, 480px); min-height: 160px; overflow: auto; padding: 6px 12px 12px; border-block: 1px solid var(--vscode-widget-border); }
+.empty { padding: 24px 8px; color: var(--vscode-descriptionForeground); text-align: center; }
+.message { margin: 8px 0; padding: 9px 10px; border: 1px solid var(--vscode-widget-border); border-radius: 7px; background: var(--vscode-editor-background); }
+.message.user { border-left: 3px solid var(--vscode-textLink-foreground); }
+.message.assistant { border-left: 3px solid var(--vscode-charts-green); }
+.meta { margin-bottom: 5px; color: var(--vscode-descriptionForeground); font: 700 9px/1 var(--vscode-editor-font-family); letter-spacing: .08em; }
+.message p { margin: 7px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message code { display: block; margin: 6px 0; padding: 6px; color: var(--vscode-debugTokenExpression-name); background: var(--vscode-textCodeBlock-background); font-family: var(--vscode-editor-font-family); }
+footer { padding: 10px 12px 14px; }
+textarea { width: 100%; resize: vertical; padding: 9px; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 6px; outline: none; color: var(--vscode-input-foreground); background: var(--vscode-input-background); }
+textarea:focus { border-color: var(--vscode-focusBorder); }
+.context { display: flex; align-items: center; gap: 5px; margin: 8px 0; }
+.context span { margin-right: auto; color: var(--vscode-descriptionForeground); font-size: 11px; }
+.context button { padding: 4px 7px; font-size: 11px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.actions .primary { margin-left: auto; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.actions .danger { color: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); }
+small { display: block; margin-top: 7px; color: var(--vscode-descriptionForeground); }
+[hidden] { display: none !important; }

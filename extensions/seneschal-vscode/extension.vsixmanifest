@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
-    <Identity Language="en-US" Id="seneschal-companion" Version="0.1.0" Publisher="rammeshgar" />
+    <Identity Language="en-US" Id="seneschal-companion" Version="0.2.1" Publisher="rammeshgar" />
     <DisplayName>Seneschal Companion</DisplayName>
-    <Description xml:space="preserve">Open the current VS Code project in Seneschal and choose the linked session.</Description>
+    <Description xml:space="preserve">Use Seneschal sessions and connected AI models directly inside Visual Studio Code.</Description>
     <Categories>Other,Machine Learning</Categories>
     <Properties>
       <Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.85.0" />

@@ -4,5 +4,7 @@
   <Default Extension="js" ContentType="application/javascript" />
   <Default Extension="md" ContentType="text/markdown" />
   <Default Extension="txt" ContentType="text/plain" />
+  <Default Extension="css" ContentType="text/css" />
+  <Default Extension="svg" ContentType="image/svg+xml" />
   <Default Extension="vsixmanifest" ContentType="text/xml" />
 </Types>

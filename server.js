@@ -41,10 +41,12 @@ const instructionDataDirectory = path.join(dataDirectory, "instructions");
 const instructionBackupDirectory = path.join(dataDirectory, "instruction-backups");
 const instructionJournalFile = path.join(instructionBackupDirectory, "journal.json");
 const agentBoardFile = path.join(dataDirectory, "agent-board.json");
+const agentBoardHistoryDirectory = path.join(dataDirectory, "agent-board-history");
 const maximumInstructionBytes = 256 * 1024;
 
 fs.mkdirSync(instructionDataDirectory, { recursive: true });
 fs.mkdirSync(instructionBackupDirectory, { recursive: true });
+fs.mkdirSync(agentBoardHistoryDirectory, { recursive: true });
 
 for (const role of ["build", "plan"]) {
   const destination = path.join(instructionDataDirectory, `${role}.md`);
@@ -64,6 +66,15 @@ const workspaceToken = localSecret("workspace-token.txt");
 const upstreamPassword = localSecret("server-password.txt", 24);
 const upstreamUsername = "opencode";
 const upstreamAuthorization = `Basic ${Buffer.from(`${upstreamUsername}:${upstreamPassword}`).toString("base64")}`;
+
+function refreshVsCodeConnection() {
+  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  const connectionDirectory = path.join(localAppData, "Seneschal");
+  const connectionFile = path.join(connectionDirectory, "vscode-connection.json");
+  fs.mkdirSync(connectionDirectory, { recursive: true });
+  fs.writeFileSync(connectionFile, `${JSON.stringify({ baseUrl: `http://${host}:${publicPort}`, token: workspaceToken }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  return connectionFile;
+}
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -600,14 +611,49 @@ function readAgentBoard() {
 }
 
 function writeAgentBoard(board) {
-  const safe = board && typeof board === "object" ? board : {};
+  const now = Date.now();
+  const safe = board && typeof board === "object" ? { ...board } : {};
+  safe.id = /^board-[a-z0-9-]+$/i.test(String(safe.id || "")) ? String(safe.id) : `board-${crypto.randomUUID()}`;
+  safe.createdAt = Number(safe.createdAt) || now;
+  safe.updatedAt = now;
   const encoded = JSON.stringify(safe, null, 2);
   if (Buffer.byteLength(encoded, "utf8") > 1024 * 1024) throw new Error("The Agent Board is too large to save.");
   const temporary = `${agentBoardFile}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, `${encoded}\n`, "utf8");
   fs.copyFileSync(temporary, agentBoardFile);
   fs.unlinkSync(temporary);
+  const historyFile = path.join(agentBoardHistoryDirectory, `${safe.id}.json`);
+  fs.writeFileSync(historyFile, `${encoded}\n`, "utf8");
   return safe;
+}
+
+function readAgentBoardHistory() {
+  return fs.readdirSync(agentBoardHistoryDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^board-[a-z0-9-]+\.json$/i.test(entry.name))
+    .map((entry) => {
+      try {
+        const board = JSON.parse(fs.readFileSync(path.join(agentBoardHistoryDirectory, entry.name), "utf8"));
+        return {
+          id: String(board.id || entry.name.replace(/\.json$/i, "")), title: String(board.title || board.objective || "Untitled board").slice(0, 120),
+          objective: String(board.objective || "").slice(0, 300), directory: String(board.directory || ""), agentCount: Array.isArray(board.agents) ? board.agents.length : 0,
+          createdAt: Number(board.createdAt || 0), updatedAt: Number(board.updatedAt || 0), active: Boolean(board.active)
+        };
+      } catch { return null; }
+    }).filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100);
+}
+
+function readAgentBoardFromHistory(id) {
+  if (!/^board-[a-z0-9-]+$/i.test(String(id || ""))) throw new Error("Choose a valid saved board.");
+  const filename = path.join(agentBoardHistoryDirectory, `${id}.json`);
+  const board = JSON.parse(fs.readFileSync(filename, "utf8"));
+  return board && typeof board === "object" ? board : {};
+}
+
+function deleteAgentBoardFromHistory(id) {
+  if (!/^board-[a-z0-9-]+$/i.test(String(id || ""))) throw new Error("Choose a valid saved board.");
+  const filename = path.join(agentBoardHistoryDirectory, `${id}.json`);
+  if (fs.existsSync(filename)) fs.unlinkSync(filename);
+  return { deleted: true, id };
 }
 
 function findVsCodeExecutable() {
@@ -630,11 +676,7 @@ function installVsCodeCompanion() {
   const runtime = vsCodeRuntimeInfo();
   if (!runtime.available) throw new Error("Visual Studio Code was not found.");
   if (!runtime.companionAvailable) throw new Error("The Seneschal VS Code companion package is missing from this installation.");
-  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-  const connectionDirectory = path.join(localAppData, "Seneschal");
-  const connectionFile = path.join(connectionDirectory, "vscode-connection.json");
-  fs.mkdirSync(connectionDirectory, { recursive: true });
-  fs.writeFileSync(connectionFile, `${JSON.stringify({ baseUrl: `http://${host}:${publicPort}`, token: workspaceToken }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  const connectionFile = refreshVsCodeConnection();
   const child = spawn(runtime.executable, ["--install-extension", runtime.companion, "--force"], { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
   return { installing: true, connectionFile };
@@ -703,6 +745,28 @@ function ensureVisibilityAwareBrowserLauncher(runtime) {
   if (!fs.existsSync(backup)) fs.copyFileSync(runtime.launcher, backup);
   fs.copyFileSync(currentLauncher, runtime.launcher);
   return browserRuntimeInfo();
+}
+
+function repairBrowserRuntime() {
+  try {
+    const runtime = browserRuntimeInfo();
+    return runtime.available && !runtime.visibilityAware ? ensureVisibilityAwareBrowserLauncher(runtime) : runtime;
+  } catch (error) {
+    console.warn(`Playwright visibility launcher could not be repaired: ${error.message}`);
+    return browserRuntimeInfo();
+  }
+}
+
+function focusVisibleBrowser(callback) {
+  const script = [
+    "$code='using System; using System.Runtime.InteropServices; public static class SeneschalWindow { [DllImport(\"user32.dll\")] public static extern bool ShowWindowAsync(IntPtr hWnd,int nCmdShow); [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); }'",
+    "Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue",
+    "$p=Get-Process brave,chrome,msedge -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowHandle -ne 0} | Sort-Object StartTime -Descending | Select-Object -First 1",
+    "if(-not $p){exit 2}",
+    "[SeneschalWindow]::ShowWindowAsync($p.MainWindowHandle,9) | Out-Null",
+    "[SeneschalWindow]::SetForegroundWindow($p.MainWindowHandle) | Out-Null"
+  ].join("; ");
+  runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], (error) => callback(error));
 }
 
 function restartPlaywrightBridge(directory, callback) {
@@ -846,6 +910,22 @@ function handleWorkspaceEndpoint(request, response, pathname) {
     });
     return true;
   }
+  if (pathname === "/workspace/agent-board/history" && request.method === "GET") {
+    try { return json(response, 200, { boards: readAgentBoardHistory() }); }
+    catch (historyError) { return endpointError(response, historyError); }
+  }
+  if (pathname === "/workspace/agent-board/history/restore" && request.method === "POST") {
+    readJsonBody(request, (error, body) => {
+      if (error) return endpointError(response, error);
+      try { return json(response, 200, writeAgentBoard(readAgentBoardFromHistory(body.id))); }
+      catch (restoreError) { return endpointError(response, restoreError); }
+    });
+    return true;
+  }
+  if (pathname === "/workspace/agent-board/history" && request.method === "DELETE") {
+    try { return json(response, 200, deleteAgentBoardFromHistory(requestUrl.searchParams.get("id"))); }
+    catch (deleteError) { return endpointError(response, deleteError); }
+  }
   if (pathname === "/workspace/vscode" && request.method === "GET") {
     const runtime = vsCodeRuntimeInfo();
     return json(response, 200, { available: runtime.available, remote: runtime.remote, companionAvailable: runtime.companionAvailable });
@@ -882,6 +962,15 @@ function handleWorkspaceEndpoint(request, response, pathname) {
           return json(response, 200, { available: true, visible: body.visible, visibilityAware: true, repairing: false, restarting: false, restarted, takesEffect: "next-browser-action" });
         });
       } catch (modeError) { return endpointError(response, modeError); }
+    });
+    return true;
+  }
+  if (pathname === "/workspace/browser-focus" && request.method === "POST") {
+    const runtime = browserRuntimeInfo();
+    if (!runtime.available || !runtime.visible) return json(response, 409, { error: "Visible browser mode is not enabled." });
+    focusVisibleBrowser((error) => {
+      if (error) return json(response, 404, { error: "The Playwright browser window has not appeared yet." });
+      return json(response, 200, { focused: true });
     });
     return true;
   }
@@ -1015,6 +1104,8 @@ function openRunningWorkspace(attempt = 0) {
 
 function openWorkspace() {
   console.log(`Seneschal: http://${host}:${publicPort}/`);
+  try { refreshVsCodeConnection(); }
+  catch (error) { console.warn(`VS Code connection could not be refreshed: ${error.message}`); }
   scheduleWeeklyBackup();
   launchWorkspaceBrowser();
 }
@@ -1022,6 +1113,7 @@ function openWorkspace() {
 function startServers() {
   if (proxy || serversStarting) return;
   serversStarting = true;
+  repairBrowserRuntime();
   startCustomProxy();
 }
 

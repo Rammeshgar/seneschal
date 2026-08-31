@@ -30,7 +30,8 @@
     excludedProjects: new Set(storage.get("seneschal-excluded-projects", [])),
     showArchivedSessions: false,
     showArchivedMessages: false,
-    railSections: storage.get("seneschal-rail-sections", { projects: false, pinnedSessions: false, sessions: false, pins: false }),
+    railSections: storage.get("seneschal-rail-sections-v2", { projects: true, pinnedSessions: true, sessions: true, pins: true }),
+    inspectorSections: storage.get("seneschal-inspector-sections", { permissions: true, tools: true, browser: true, creative: true, code: true, budget: true, providers: true, pulse: true }),
     maximizedMessageID: "",
     editingMessageID: "",
     attachments: [],
@@ -81,7 +82,9 @@
     blender: { installed: false, bridge: false },
     browserRuntime: { available: false, visible: false, restarting: false },
     vscodeRuntime: { available: false, remote: "", companionAvailable: false },
-    agentBoard: { version: 2, directory: "", objective: "", concurrency: 2, active: false, paused: false, agents: [] },
+    agentBoard: { version: 3, id: "", title: "", directory: "", objective: "", concurrency: 2, active: false, paused: false, agents: [], communications: [] },
+    agentBoardHistory: [],
+    agentBoardDesigning: false,
     agentBoardTimer: null,
     agentBoardSaving: null,
     paidUsage: { budget: 10, cost: null, percent: null },
@@ -117,7 +120,7 @@
     blenderState: $("#blenderState"), blenderCard: $("#blenderCard"), blenderDetail: $("#blenderDetail"),
     budgetState: $("#budgetState"), budgetMeter: $("#budgetMeter"), budgetAmount: $("#budgetAmount"),
     vscodeState: $("#vscodeState"), vscodeCard: $("#vscodeCard"), vscodeDetail: $("#vscodeDetail"), vscodeDialog: $("#vscodeDialog"), vscodeForm: $("#vscodeForm"), vscodePath: $("#vscodePathInput"), vscodeLine: $("#vscodeLineInput"), vscodeColumn: $("#vscodeColumnInput"), vscodeError: $("#vscodeError"),
-    agentBoardDialog: $("#agentBoardDialog"), agentBoardColumns: $("#agentBoardColumns"), agentBoardObjective: $("#agentBoardObjective"), agentBoardConcurrency: $("#agentBoardConcurrency"), agentBoardState: $("#agentBoardState"), agentBoardSummary: $("#agentBoardSummary"),
+    agentBoardDialog: $("#agentBoardDialog"), agentBoardColumns: $("#agentBoardColumns"), agentBoardObjective: $("#agentBoardObjective"), agentBoardConcurrency: $("#agentBoardConcurrency"), agentBoardState: $("#agentBoardState"), agentBoardSummary: $("#agentBoardSummary"), agentBoardHistoryDialog: $("#agentBoardHistoryDialog"), agentBoardHistoryList: $("#agentBoardHistoryList"),
     agentEditorDialog: $("#agentEditorDialog"), agentEditorForm: $("#agentEditorForm"), agentName: $("#agentNameInput"), agentRole: $("#agentRoleInput"), agentModel: $("#agentModelInput"), agentAccess: $("#agentAccessInput"), agentDependency: $("#agentDependencyInput"), agentPrompt: $("#agentPromptInput"), agentEditingID: $("#agentEditingID"), agentEditorError: $("#agentEditorError"),
     instructionDialog: $("#instructionDialog"), instructionSaveState: $("#instructionSaveState"), instructionError: $("#instructionError"),
     personaEditor: $("#personaEditor"), generalEditor: $("#generalEditor"), projectEditor: $("#projectEditor"),
@@ -221,6 +224,13 @@
   }
 
   function selectedSession() { return state.sessions.find((session) => session.id === state.currentSessionID); }
+  function isBoardSession(session) {
+    if (!session) return false;
+    if (/^\[(?:Board|Board Architect)\]\s/i.test(String(session.title || ""))) return true;
+    if (session.id && session.id === state.agentBoard.architectSessionID) return true;
+    return state.agentBoard.agents.some((agent) => agent.sessionID && agent.sessionID === session.id && !agent.imported);
+  }
+  function ordinarySessions() { return state.sessions.filter((session) => !isBoardSession(session)); }
   function selectedModel() { return state.models.find((model) => model.value === state.selectedModel) || state.models[0]; }
 
   function modelReference(session) {
@@ -727,14 +737,28 @@
 
   function toggleRailSection(key) {
     state.railSections[key] = !state.railSections[key];
-    storage.set("seneschal-rail-sections", state.railSections);
+    storage.set("seneschal-rail-sections-v2", state.railSections);
     syncRailSections();
+  }
+
+  function syncInspectorSections() {
+    const keys = ["permissions", "tools", "browser", "creative", "code", "budget", "providers", "pulse"];
+    $$(".inspector-block", els.inspector).forEach((section, index) => {
+      const key = keys[index] || `section-${index}`; section.dataset.inspectorSection = key;
+      let button = $(".inspector-section-toggle", section);
+      if (!button) {
+        button = document.createElement("button"); button.type = "button"; button.className = "inspector-section-toggle"; button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';
+        $(".block-title", section)?.append(button);
+        button.addEventListener("click", () => { state.inspectorSections[key] = !state.inspectorSections[key]; storage.set("seneschal-inspector-sections", state.inspectorSections); syncInspectorSections(); });
+      }
+      const collapsed = Boolean(state.inspectorSections[key]); section.classList.toggle("collapsed", collapsed); button.setAttribute("aria-expanded", String(!collapsed)); button.setAttribute("aria-label", `${collapsed ? "Expand" : "Minimize"} ${$(".block-title > span", section)?.textContent || "section"}`);
+    });
   }
 
   function renderProjects() {
     const dirs = directories();
     els.projectList.innerHTML = dirs.length ? dirs.map((dir) => {
-      const count = state.sessions.filter((session) => session.directory === dir && !session.parentID).length;
+      const count = ordinarySessions().filter((session) => session.directory === dir && !session.parentID).length;
       const active = dir === state.currentDirectory ? " active" : "";
       const title = basename(dir);
       return `<div class="project-row${active}"><button class="project-item${active}" data-directory="${escapeHTML(dir)}" title="Open ${escapeHTML(dir)}"><span class="project-glyph">${escapeHTML(title.slice(0,1).toUpperCase())}</span><span>${escapeHTML(title)}</span><small>${count}</small></button><button class="project-delete-button" type="button" data-delete-project="${escapeHTML(dir)}" aria-label="Delete ${escapeHTML(title)} from Seneschal" title="Remove project from Seneschal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></div>`;
@@ -795,7 +819,7 @@
     storage.set("seneschal-pinned-sessions", [...state.pinnedSessions]);
     if (!state.archivedSessions.size) state.showArchivedSessions = false;
     if (active && state.currentSessionID === sessionID) {
-      const next = state.sessions
+      const next = ordinarySessions()
         .filter((session) => session.directory === state.currentDirectory && !session.parentID && !state.archivedSessions.has(session.id))
         .sort((a, b) => Number(state.pinnedSessions.has(b.id)) - Number(state.pinnedSessions.has(a.id)) || (b.time?.updated || 0) - (a.time?.updated || 0))[0];
       state.currentSessionID = next?.id || "";
@@ -828,7 +852,7 @@
   }
 
   function renderSessions() {
-    const allSessions = state.sessions
+    const allSessions = ordinarySessions()
       .filter((session) => session.directory === state.currentDirectory && !session.parentID)
       .sort((a, b) => Number(state.pinnedSessions.has(b.id)) - Number(state.pinnedSessions.has(a.id)) || (b.time?.updated || 0) - (a.time?.updated || 0));
     const archivedCount = allSessions.filter((session) => state.archivedSessions.has(session.id)).length;
@@ -842,7 +866,7 @@
     els.archivedSessionsButton.setAttribute("aria-label", `${state.showArchivedSessions ? "Hide" : "Show"} ${archivedCount} archived session${archivedCount === 1 ? "" : "s"}`);
     els.archivedSessionsButton.title = `${state.showArchivedSessions ? "Hide" : "Show"} archived sessions`;
     els.archivedSessionsCount.textContent = String(archivedCount);
-    $("#settingsArchives").textContent = `${state.archivedSessions.size} archived`;
+    $("#settingsArchives").textContent = `${ordinarySessions().filter((session) => state.archivedSessions.has(session.id)).length} archived`;
     els.sessionList.innerHTML = sessions.length ? sessions.map(sessionRailItem).join("") : '<div class="empty-rail">No unpinned sessions in this project.</div>';
     bindSessionRailActions();
     syncRailSections();
@@ -1043,6 +1067,7 @@
     workspace("/workspace/browser-mode").then((runtime) => { state.browserRuntime = runtime; renderBrowser(); }).catch(() => renderBrowser());
     workspace("/workspace/vscode").then((runtime) => { state.vscodeRuntime = runtime; renderVsCode(); }).catch(() => renderVsCode());
     workspace("/workspace/agent-board").then((board) => { state.agentBoard = normalizeAgentBoard(board); renderAgentBoard(); startAgentBoardMonitor(); }).catch(() => renderAgentBoard());
+    workspace("/workspace/agent-board/history").then((history) => { state.agentBoardHistory = history.boards || []; renderAgentBoardHistory(); }).catch(() => renderAgentBoardHistory());
   }
 
   function renderVsCode() {
@@ -1097,13 +1122,16 @@
       access: ["observe", "read", "browser", "build"].includes(agent.access) ? agent.access : agent.role === "build" ? "build" : "read",
       imported: Boolean(agent.imported), activity: String(agent.activity || ""), activityType: String(agent.activityType || ""), activityAt: Number(agent.activityAt || 0),
       sessionID: String(agent.sessionID || ""), status: ["ready", "waiting", "running", "complete", "failed"].includes(agent.status) ? agent.status : "ready",
-      error: String(agent.error || ""), startedAt: Number(agent.startedAt || 0), completedAt: Number(agent.completedAt || 0)
+      error: String(agent.error || ""), startedAt: Number(agent.startedAt || 0), completedAt: Number(agent.completedAt || 0), sourceText: String(agent.sourceText || ""), sourceMessageID: String(agent.sourceMessageID || ""), sourceSessionID: String(agent.sourceSessionID || ""),
+      inbox: Array.isArray(agent.inbox) ? agent.inbox.slice(-20).map((item) => ({ id: String(item.id || crypto.randomUUID()), fromID: String(item.fromID || ""), fromName: String(item.fromName || "Agent"), text: String(item.text || "").slice(0, 4000), createdAt: Number(item.createdAt || Date.now()), delivered: Boolean(item.delivered) })) : [],
+      waitingFor: Array.isArray(agent.waitingFor) ? agent.waitingFor.map(String).filter(Boolean) : [], iteration: Math.max(0, Number(agent.iteration) || 0), processedRequests: Array.isArray(agent.processedRequests) ? agent.processedRequests.map(String).slice(-30) : []
     })) : [];
     const ids = new Set(agents.map((agent) => agent.id));
-    agents.forEach((agent) => { agent.dependencies = agent.dependencies.filter((id) => ids.has(id) && id !== agent.id); });
+    agents.forEach((agent) => { agent.dependencies = agent.dependencies.filter((id) => ids.has(id) && id !== agent.id); agent.waitingFor = agent.waitingFor.filter((id) => ids.has(id) && id !== agent.id); });
     return {
-      version: 2, directory: String(board.directory || ""), objective: String(board.objective || ""), concurrency: Math.min(4, Math.max(1, Number(board.concurrency) || 2)),
-      active: Boolean(board.active), paused: Boolean(board.paused), agents
+      version: 3, id: String(board.id || ""), title: String(board.title || ""), directory: String(board.directory || ""), objective: String(board.objective || ""), concurrency: Math.min(8, Math.max(1, Number(board.concurrency) || 2)),
+      active: Boolean(board.active), paused: Boolean(board.paused), createdAt: Number(board.createdAt || 0), updatedAt: Number(board.updatedAt || 0), planText: String(board.planText || ""), planMessageID: String(board.planMessageID || ""), sourceSessionID: String(board.sourceSessionID || ""), architectSessionID: String(board.architectSessionID || ""),
+      communications: Array.isArray(board.communications) ? board.communications.slice(-100).map((item) => ({ id: String(item.id || crypto.randomUUID()), fromID: String(item.fromID || ""), toID: String(item.toID || ""), text: String(item.text || "").slice(0, 4000), createdAt: Number(item.createdAt || Date.now()), status: String(item.status || "requested") })) : [], agents
     };
   }
 
@@ -1114,6 +1142,7 @@
   function boardColumnStatus(agent) {
     if (["complete", "failed"].includes(agent.status)) return "done";
     if (agent.status === "running") return "running";
+    if (agent.status === "waiting" || agent.waitingFor?.some((id) => boardAgent(id)?.status !== "complete")) return "waiting";
     const dependencies = agent.dependencies.map(boardAgent).filter(Boolean);
     return dependencies.length && dependencies.some((item) => item.status !== "complete") ? "waiting" : "ready";
   }
@@ -1124,20 +1153,26 @@
 
   function scheduleAgentBoardSave() {
     clearTimeout(state.agentBoardSaving);
-    state.agentBoardSaving = setTimeout(() => workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard }).catch((error) => toast(`Agent Board could not be saved: ${error.message}`, "error")), 180);
+    state.agentBoardSaving = setTimeout(async () => {
+      try {
+        const saved = await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard });
+        state.agentBoard.id = saved.id || state.agentBoard.id; state.agentBoard.createdAt = saved.createdAt || state.agentBoard.createdAt; state.agentBoard.updatedAt = saved.updatedAt || state.agentBoard.updatedAt;
+      } catch (error) { toast(`Agent Board could not be saved: ${error.message}`, "error"); }
+    }, 180);
   }
 
   function renderAgentBoard() {
     const board = state.agentBoard;
     const counts = boardCounts();
     $("#agentBoardRailCount").textContent = String(board.agents.length);
+    $("#agentBoardHistoryRailCount").textContent = String(state.agentBoardHistory.length);
     $("#settingsAgentBoard").textContent = board.active ? `${counts.running} running` : board.agents.length ? `${board.agents.length} agents` : "Ready";
     if (!els.agentBoardColumns) return;
     $("#agentBoardGuide").hidden = board.agents.length > 0;
     if (document.activeElement !== els.agentBoardObjective) els.agentBoardObjective.value = board.objective;
     els.agentBoardConcurrency.value = String(board.concurrency);
-    els.agentBoardState.className = `board-state ${board.active ? board.paused ? "paused" : "running" : ""}`;
-    els.agentBoardState.innerHTML = `<i></i>${board.active ? board.paused ? "Paused" : "Running" : "Idle"}`;
+    els.agentBoardState.className = `board-state ${state.agentBoardDesigning ? "running" : board.active ? board.paused ? "paused" : "running" : ""}`;
+    els.agentBoardState.innerHTML = `<i></i>${state.agentBoardDesigning ? "Designing team" : board.active ? board.paused ? "Paused" : "Running" : "Idle"}`;
     const columnDefinitions = [
       ["ready", "Ready", "Agents whose dependencies are complete."], ["waiting", "Waiting", "Blocked until another agent finishes."],
       ["running", "Running", "Independent OpenCode sessions working now."], ["done", "Done", "Completed or failed agents with retained sessions."]
@@ -1148,8 +1183,9 @@
     }).join("");
     const complete = board.agents.filter((agent) => agent.status === "complete").length;
     const failed = board.agents.filter((agent) => agent.status === "failed").length;
-    els.agentBoardSummary.textContent = board.agents.length ? `${complete} completed · ${counts.running} running · ${counts.waiting} waiting${failed ? ` · ${failed} failed` : ""}` : "No agents yet. Add one or use Starter team.";
-    $("#agentBoardRunButton").disabled = !board.agents.length || !state.currentDirectory;
+    const requestCount = board.communications?.length || 0;
+    els.agentBoardSummary.textContent = state.agentBoardDesigning ? "The Board Architect is reading the selected plan and assigning the team…" : board.agents.length ? `${complete} completed · ${counts.running} running · ${counts.waiting} waiting${failed ? ` · ${failed} failed` : ""}${requestCount ? ` · ${requestCount} agent request${requestCount === 1 ? "" : "s"}` : ""}` : "No agents yet. Send a plan response here or use Starter team.";
+    $("#agentBoardRunButton").disabled = state.agentBoardDesigning || !board.agents.length || !state.currentDirectory;
     $("#agentBoardImportButton").disabled = !selectedSession();
     $("#agentBoardPauseButton").disabled = !board.active;
     $("#agentBoardPauseButton").textContent = board.paused ? "Resume queue" : "Pause queue";
@@ -1169,7 +1205,8 @@
     const runButton = agent.imported ? "" : `<button type="button" data-board-run="${escapeHTML(agent.id)}"${agent.status === "running" || columnStatus === "waiting" ? " disabled" : ""}>${["complete", "failed"].includes(agent.status) ? "Run again" : "Run"}</button>`;
     const stopButton = agent.status === "running" ? `<button type="button" class="board-stop-button" data-board-stop="${escapeHTML(agent.id)}">Stop</button>` : "";
     const activity = agent.activity ? `<div class="board-agent-activity"><strong>${escapeHTML(agent.activityType || "Live activity")}</strong><span title="${escapeHTML(agent.activity)}">${escapeHTML(agent.activity)}</span></div>` : "";
-    return `<article class="board-agent-card ${escapeHTML(agent.status === "ready" ? columnStatus : agent.status)}"><div class="board-agent-head"><span class="board-agent-role">${boardRoleMark(agent.role)}</span><div class="board-agent-title"><strong>${escapeHTML(agent.name)}</strong><small>${escapeHTML(boardRoleLabel(agent.role))} · ${escapeHTML(state.models.find((model) => model.value === agent.model)?.name || (agent.imported ? "Imported model" : "Current model"))}</small></div><div class="board-agent-menu"><button type="button" data-board-edit="${escapeHTML(agent.id)}" title="${agent.status === "running" ? "Stop this agent before editing" : "Edit agent"}"${agent.status === "running" || agent.imported ? " disabled" : ""}>✎</button><button type="button" class="danger" data-board-delete="${escapeHTML(agent.id)}" title="Delete card"${agent.status === "running" ? " disabled" : ""}>×</button></div></div><div class="board-agent-meta"><span>${escapeHTML(boardAccessLabel(agent.access))}</span>${agent.imported ? "<span>Imported context</span>" : ""}</div><p>${escapeHTML(agent.error || agent.prompt || "No task written yet.")}</p>${activity}${dependencyNames.length ? `<div class="board-dependency">Waits for: ${escapeHTML(dependencyNames.join(", "))}</div>` : ""}<div class="board-agent-actions"><span>${sessionStatusText}</span><div>${sessionButton}${stopButton}${runButton}</div></div></article>`;
+    const requests = (agent.inbox || []).filter((item) => !item.delivered).length;
+    return `<article class="board-agent-card ${escapeHTML(agent.status === "ready" ? columnStatus : agent.status)}"><div class="board-agent-head"><span class="board-agent-role">${boardRoleMark(agent.role)}</span><div class="board-agent-title"><strong>${escapeHTML(agent.name)}</strong><small>${escapeHTML(boardRoleLabel(agent.role))} · ${escapeHTML(state.models.find((model) => model.value === agent.model)?.name || (agent.imported ? "Imported model" : "Current model"))}</small></div><div class="board-agent-menu"><button type="button" data-board-edit="${escapeHTML(agent.id)}" title="${agent.status === "running" ? "Stop this agent before editing" : "Edit agent"}"${agent.status === "running" || agent.imported ? " disabled" : ""}>✎</button><button type="button" class="danger" data-board-delete="${escapeHTML(agent.id)}" title="Delete card"${agent.status === "running" ? " disabled" : ""}>×</button></div></div><div class="board-agent-meta"><span>${escapeHTML(boardAccessLabel(agent.access))}</span>${agent.imported ? "<span>Selected plan</span>" : ""}${agent.iteration ? `<span>Pass ${agent.iteration + 1}</span>` : ""}${requests ? `<span>${requests} request${requests === 1 ? "" : "s"}</span>` : ""}</div><p>${escapeHTML(agent.error || agent.prompt || "No task written yet.")}</p>${activity}${dependencyNames.length ? `<div class="board-dependency">Waits for: ${escapeHTML(dependencyNames.join(", "))}</div>` : ""}<div class="board-agent-actions"><span>${sessionStatusText}</span><div>${sessionButton}${stopButton}${runButton}</div></div></article>`;
   }
 
   async function openAgentBoard() {
@@ -1178,6 +1215,40 @@
     if (state.agentBoard.directory && state.agentBoard.directory !== state.currentDirectory) await switchDirectory(state.agentBoard.directory);
     renderAgentBoard();
     els.agentBoardDialog.showModal();
+  }
+
+  function renderAgentBoardHistory() {
+    const boards = state.agentBoardHistory || [];
+    $("#agentBoardHistoryRailCount").textContent = String(boards.length);
+    els.agentBoardHistoryList.innerHTML = boards.length ? boards.map((board) => `<article class="board-history-item${board.id === state.agentBoard.id ? " current" : ""}"><div><strong>${escapeHTML(board.title || "Untitled board")}</strong><span>${escapeHTML(board.objective || board.directory || "Saved Agent Board")}</span><small>${board.agentCount} agents · ${board.updatedAt ? new Date(board.updatedAt).toLocaleString() : "Saved locally"}${board.id === state.agentBoard.id ? " · Open now" : ""}</small></div><div class="board-history-actions"><button type="button" class="secondary-button" data-board-open-history="${escapeHTML(board.id)}">Open board</button><button type="button" class="danger-text-button" data-board-history-delete="${escapeHTML(board.id)}">Delete</button></div></article>`).join("") : '<div class="board-history-empty">No saved boards yet. Send one plan response to the Agent Board to create the first saved board.</div>';
+    $$('[data-board-open-history]', els.agentBoardHistoryList).forEach((button) => button.addEventListener("click", () => openSavedAgentBoard(button.dataset.boardOpenHistory)));
+    $$('[data-board-history-delete]', els.agentBoardHistoryList).forEach((button) => button.addEventListener("click", () => deleteAgentBoardHistory(button.dataset.boardHistoryDelete)));
+  }
+
+  async function openAgentBoardHistory() {
+    if (state.agentBoard.agents.length) await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard }).catch(() => null);
+    try { state.agentBoardHistory = (await workspace("/workspace/agent-board/history")).boards || []; }
+    catch (error) { toast(`Board history could not be loaded: ${error.message}`, "error"); return; }
+    renderAgentBoardHistory();
+    if (!els.agentBoardHistoryDialog.open) els.agentBoardHistoryDialog.showModal();
+  }
+
+  async function openSavedAgentBoard(id) {
+    if (state.agentBoard.agents.some((agent) => agent.status === "running") && id !== state.agentBoard.id) { toast("Stop the running board before opening another one.", "warn"); return; }
+    try {
+      if (id !== state.agentBoard.id) state.agentBoard = normalizeAgentBoard(await workspace("/workspace/agent-board/history/restore", { method: "POST", body: { id } }));
+      els.agentBoardHistoryDialog.close(); renderAgentBoard();
+      if (state.agentBoard.directory && state.agentBoard.directory !== state.currentDirectory) await switchDirectory(state.agentBoard.directory);
+      if (!els.agentBoardDialog.open) els.agentBoardDialog.showModal();
+      toast("Saved board opened exactly as stored. The plan was not resent or redesigned.");
+    } catch (error) { toast(`Board could not be opened: ${error.message}`, "error"); }
+  }
+
+  async function deleteAgentBoardHistory(id) {
+    if (id === state.agentBoard.id) { toast("Reset or restore another board before deleting the current board's history.", "warn"); return; }
+    if (!confirm("Delete this saved board record? Its OpenCode sessions and project files will not be deleted.")) return;
+    try { await workspace(`/workspace/agent-board/history?id=${encodeURIComponent(id)}`, { method: "DELETE" }); state.agentBoardHistory = state.agentBoardHistory.filter((board) => board.id !== id); renderAgentBoardHistory(); }
+    catch (error) { toast(`Saved board could not be deleted: ${error.message}`, "error"); }
   }
 
   function boardModelOptions(selected = "") {
@@ -1258,7 +1329,95 @@
     toast("Current session added as the board's project brief. Add the Starter team, choose each model and access level, then Run board.");
   }
 
+  function messagePlainText(message) {
+    return (message?.parts || []).filter((part) => part.type === "text" && part.text).map((part) => part.text).join("\n\n").trim();
+  }
+
+  async function waitForArchitectResult(sessionID, directory) {
+    const started = Date.now(); let lastText = "";
+    while (Date.now() - started < 150000) {
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+      const [statuses, messages] = await Promise.all([
+        api("/session/status", { noDirectory: true }).catch(() => ({})),
+        api(`/session/${encodeURIComponent(sessionID)}/message`, { directory }).catch(() => [])
+      ]);
+      const assistant = [...messages].reverse().find((item) => item.info?.role === "assistant");
+      lastText = messagePlainText(assistant) || lastText;
+      const entry = statuses[sessionID]; const status = typeof entry === "string" ? entry : entry?.type || entry?.status;
+      if (lastText && status === "idle") return lastText;
+      if (lastText && assistant?.info?.time?.completed) return lastText;
+    }
+    throw new Error("The Board Architect took too long. Its session was kept so you can inspect or retry it.");
+  }
+
+  function parseBoardArchitecture(text) {
+    const cleaned = String(text || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const start = cleaned.indexOf("{"); const end = cleaned.lastIndexOf("}");
+    if (start < 0 || end <= start) throw new Error("The Board Architect did not return a usable team design.");
+    const design = JSON.parse(cleaned.slice(start, end + 1));
+    if (!Array.isArray(design.agents) || design.agents.length < 2) throw new Error("The generated board needs at least two agents.");
+    return design;
+  }
+
+  function boardFromArchitecture(design, planText, messageID, originSessionID, architectSessionID, originDirectory) {
+    const selected = selectedModel() || state.models[0]; const fallbackModel = selected?.value || "";
+    const rawAgents = design.agents.slice(0, 8); const keyMap = new Map(); const keyIndexes = new Map();
+    const normalizedKeys = rawAgents.map((raw, index) => {
+      const base = String(raw.key || raw.name || `agent-${index}`).toLowerCase(); let key = base;
+      while (keyMap.has(key)) key = `${base}-${index + 1}`;
+      keyMap.set(key, `agent-${crypto.randomUUID()}`); if (!keyIndexes.has(base)) { keyMap.set(base, keyMap.get(key)); keyIndexes.set(base, index); } keyIndexes.set(key, index); return key;
+    });
+    const sourceID = `agent-${crypto.randomUUID()}`;
+    const agents = rawAgents.map((raw, index) => {
+      const key = normalizedKeys[index];
+      const role = ["plan", "build", "review", "supervisor"].includes(raw.role) ? raw.role : "build";
+      const namedModel = state.models.find((model) => model.value === raw.model || model.name.toLowerCase() === String(raw.model || "").toLowerCase());
+      const dependencies = Array.isArray(raw.dependsOn) ? raw.dependsOn.map((item) => String(item).toLowerCase()).filter((item) => keyIndexes.has(item) && keyIndexes.get(item) < index).map((item) => keyMap.get(item)).filter(Boolean) : [];
+      return { id: keyMap.get(key), name: String(raw.name || boardRoleLabel(role)).slice(0, 48), role, model: namedModel?.value || fallbackModel, access: ["observe", "read", "browser", "build"].includes(raw.access) ? raw.access : role === "build" ? "build" : "read", prompt: String(raw.task || raw.prompt || "Complete the assigned part of the project.").slice(0, 12000), dependencies: [...new Set([sourceID, ...dependencies])], status: "ready", inbox: [], waitingFor: [], iteration: 0 };
+    });
+    let supervisors = agents.filter((agent) => agent.role === "supervisor");
+    if (!supervisors.length) {
+      const supervisor = { id: `agent-${crypto.randomUUID()}`, name: "Project Supervisor", role: "supervisor", model: fallbackModel, access: "read", prompt: "Own the final project outcome. Inspect all handoffs, verify the real result against the plan, request rework where needed, and deliver the final acceptance report.", dependencies: [sourceID, ...agents.map((agent) => agent.id)], status: "ready", inbox: [], waitingFor: [], iteration: 0 };
+      agents.push(supervisor); supervisors = [supervisor];
+    }
+    supervisors.slice(1).forEach((agent) => { agent.role = "review"; });
+    const supervisor = supervisors[0];
+    agents.filter((agent) => agent.id !== supervisor.id).forEach((agent) => { agent.dependencies = agent.dependencies.filter((id) => id !== supervisor.id); });
+    supervisor.dependencies = [...new Set([sourceID, ...agents.filter((agent) => agent.id !== supervisor.id).map((agent) => agent.id)])];
+    const source = { id: sourceID, name: "Selected plan", role: "source", access: "read", imported: true, model: fallbackModel, prompt: "The exact plan response selected by the user.", sourceText: planText, sourceMessageID: messageID, sourceSessionID: originSessionID, dependencies: [], status: "complete", activity: "Chosen plan is ready as the project brief.", activityType: "Selected message", completedAt: Date.now(), inbox: [], waitingFor: [], iteration: 0 };
+    const objective = String(design.objective || design.title || planText.split(/\n/).find(Boolean) || "Complete the selected plan.").slice(0, 8000);
+    return normalizeAgentBoard({ version: 3, title: String(design.title || objective).slice(0, 120), directory: originDirectory || state.currentDirectory, objective, concurrency: Math.min(8, Math.max(1, Number(design.concurrency) || Math.min(4, agents.length))), planText, planMessageID: messageID, sourceSessionID: originSessionID, architectSessionID, active: false, paused: false, communications: [], agents: [source, ...agents] });
+  }
+
+  async function createBoardFromMessage(messageID) {
+    const message = state.messages.find((item) => item.info?.id === messageID);
+    const planText = messagePlainText(message);
+    const origin = selectedSession();
+    if (!origin || !planText) { toast("This response has no plan text to send.", "warn"); return; }
+    if (state.agentBoard.agents.some((agent) => agent.status === "running")) { toast("Stop the running board before replacing it with a new plan.", "warn"); return; }
+    if (state.agentBoard.agents.length && !confirm("Create a new board from this response? The current board stays available in History.")) return;
+    state.agentBoardDesigning = true; renderMessages(); renderAgentBoard();
+    if (!els.agentBoardDialog.open) await openAgentBoard();
+    try {
+      if (state.agentBoard.agents.length) await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard });
+      const model = selectedModel() || state.models[0];
+      if (!model) throw new Error("Choose a connected model before designing the team.");
+      const architect = await api("/session", { directory: origin.directory, method: "POST", body: { title: `[Board Architect] ${origin.title || "Plan"}` } });
+      state.sessions.unshift(architect);
+      const catalog = state.models.slice(0, 40).map((item) => ({ value: item.value, name: item.name, provider: item.providerName }));
+      const prompt = `You are Seneschal's Board Architect. Read only the plan below and design the smallest effective multi-agent workflow for it. Independent work should run in parallel. Include exactly one supervisor who owns acceptance and can request rework. Give each agent one concrete role, task, system access, and dependencies. Use 2-8 agents. Access must be observe, read, browser, or build. Roles must be plan, build, review, or supervisor. Keys must be unique and dependsOn may reference only agents listed earlier. Choose model values only from the supplied catalog; otherwise omit model. Return JSON only, with this shape: {"title":"...","objective":"...","concurrency":3,"agents":[{"key":"unique-key","name":"...","role":"plan","access":"read","model":"optional catalog value","task":"...","dependsOn":["earlier-key"]}]}.\n\n# Available models\n${JSON.stringify(catalog)}\n\n# Selected plan\n${planText.slice(0, 50000)}`;
+      const tools = Object.fromEntries([...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"])].map((tool) => [tool, false]));
+      await api(`/session/${encodeURIComponent(architect.id)}/prompt_async`, { directory: origin.directory, method: "POST", body: { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools, agent: "plan", parts: [{ type: "text", text: prompt }] } });
+      const design = parseBoardArchitecture(await waitForArchitectResult(architect.id, origin.directory));
+      state.agentBoard = boardFromArchitecture(design, planText, messageID, origin.id, architect.id, origin.directory);
+      state.agentBoard = normalizeAgentBoard(await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard }));
+      renderAgentBoard(); renderSessions(); toast(`${state.agentBoard.agents.length - 1} agents were designed from the selected plan. Review their cards, then run the board.`);
+    } catch (error) { toast(`The board could not be generated: ${error.message}`, "error"); }
+    finally { state.agentBoardDesigning = false; renderMessages(); renderAgentBoard(); }
+  }
+
   async function boardAgentResult(agent) {
+    if (agent?.sourceText) return agent.sourceText.slice(-30000);
     if (!agent?.sessionID) return "No session output was available.";
     try {
       const messages = await api(`/session/${encodeURIComponent(agent.sessionID)}/message`, { directory: state.agentBoard.directory || state.currentDirectory });
@@ -1282,7 +1441,42 @@
       if (!dependency) continue;
       handoffs.push(`## Handoff from ${dependency.name} (${boardRoleLabel(dependency.role)})\n${await boardAgentResult(dependency)}`);
     }
-    return `You are the ${boardRoleLabel(agent.role)} named ${agent.name} on a Seneschal Agent Board.\n\n# Shared objective\n${state.agentBoard.objective || "Complete the assigned project task."}\n\n# Your responsibility\n${agent.prompt}\n\n${handoffs.length ? `# Verified dependency handoffs\n${handoffs.join("\n\n")}` : "# Dependencies\nNone. Begin from the project state and objective."}\n\nWork only within your responsibility. Inspect the real project state, respect approvals, and finish with a clear handoff containing results, changed files, verification, blockers, and what the next agent needs.`;
+    const inbox = (agent.inbox || []).filter((item) => !item.delivered);
+    const requests = inbox.length ? `# Requests from other agents\n${inbox.map((item) => `## ${item.fromName}\n${item.text}`).join("\n\n")}` : "# Requests from other agents\nNone.";
+    const supervisorRule = agent.role === "supervisor" ? "As Supervisor, you own the final project outcome. Do not declare success unless the real result meets the objective. Return inadequate work to the responsible agent with the request tag below." : "You may request clarification or rework from another board agent when their output is genuinely insufficient.";
+    return `You are the ${boardRoleLabel(agent.role)} named ${agent.name} on a Seneschal Agent Board.\n\n# Shared objective\n${state.agentBoard.objective || "Complete the assigned project task."}\n\n# Your responsibility\n${agent.prompt}\n\n${handoffs.length ? `# Verified dependency handoffs\n${handoffs.join("\n\n")}` : "# Dependencies\nNone. Begin from the project state and objective."}\n\n${requests}\n\n${supervisorRule}\n\nWork only within your responsibility. Inspect the real project state, respect approvals, and finish with a clear handoff containing results, changed files, verification, blockers, and what the next agent needs. If another agent must do more work, add exactly one visible line for each request in this form: <board-request target="Exact agent name">Specific correction or follow-up needed</board-request>. Do not use this tag for optional suggestions.`;
+  }
+
+  async function processBoardRequests(agent, resultText = "") {
+    const pattern = /<board-request\s+target=["']([^"']+)["']\s*>([\s\S]*?)<\/board-request>/gi;
+    let match; let changed = false;
+    while ((match = pattern.exec(String(resultText))) !== null) {
+      const targetName = match[1].trim(); const requestText = match[2].replace(/<[^>]+>/g, "").trim().slice(0, 4000);
+      const signature = `${targetName.toLowerCase()}:${requestText.toLowerCase()}`;
+      if (!requestText || agent.processedRequests.includes(signature)) continue;
+      agent.processedRequests.push(signature); agent.processedRequests = agent.processedRequests.slice(-30);
+      const target = state.agentBoard.agents.find((item) => item.id !== agent.id && item.name.toLowerCase() === targetName.toLowerCase());
+      if (!target || target.imported || target.status === "running") continue;
+      if (agent.iteration >= 3 || target.iteration >= 3) {
+        state.agentBoard.communications.push({ id: `request-${crypto.randomUUID()}`, fromID: agent.id, toID: target.id, text: requestText, createdAt: Date.now(), status: "iteration-limit" });
+        continue;
+      }
+      const request = { id: `request-${crypto.randomUUID()}`, fromID: agent.id, fromName: agent.name, text: requestText, createdAt: Date.now(), delivered: false };
+      target.inbox.push(request); target.status = "ready"; target.error = ""; target.completedAt = 0; target.iteration += 1;
+      agent.status = "waiting"; agent.waitingFor = [...new Set([...(agent.waitingFor || []), target.id])]; agent.activity = `Requested another pass from ${target.name}.`; agent.activityType = "Waiting for rework";
+      state.agentBoard.communications.push({ id: request.id, fromID: agent.id, toID: target.id, text: requestText, createdAt: request.createdAt, status: "requested" });
+      changed = true;
+    }
+    state.agentBoard.communications = state.agentBoard.communications.slice(-100);
+    return changed;
+  }
+
+  function releaseWaitingBoardAgents(completedID) {
+    state.agentBoard.agents.forEach((agent) => {
+      if (agent.status !== "waiting" || !agent.waitingFor?.includes(completedID)) return;
+      agent.waitingFor = agent.waitingFor.filter((id) => id !== completedID && boardAgent(id)?.status !== "complete");
+      if (!agent.waitingFor.length) { agent.status = "ready"; agent.activity = "Requested rework returned. Ready to verify again."; agent.activityType = "Rechecking"; agent.iteration += 1; }
+    });
   }
 
   async function runBoardAgent(agentID, manual = false) {
@@ -1314,6 +1508,7 @@
       const toolOverrides = Object.fromEntries(availableTools.map((tool) => [tool, allowed(tool)]));
       state.statuses[agent.sessionID] = { type: "busy" };
       await api(`/session/${encodeURIComponent(agent.sessionID)}/prompt_async`, { directory, method: "POST", body: { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools: toolOverrides, agent: requestAgent, parts: [{ type: "text", text }] } });
+      (agent.inbox || []).forEach((item) => { item.delivered = true; });
       agent.activity = "Prompt accepted. Waiting for the first model step…"; agent.activityType = "Working"; agent.activityAt = Date.now();
       scheduleAgentBoardSave(); renderSessions(); renderAgentBoard();
       return true;
@@ -1358,7 +1553,12 @@
           if (!state.sessions.some((session) => session.id === agent.sessionID)) { agent.status = "failed"; agent.error = "The linked session no longer exists."; agent.completedAt = Date.now(); changed = true; }
         }
       }
-      if (completed && agent.status === "running") { agent.status = "complete"; agent.activity = "Final handoff is ready in the linked session."; agent.activityType = "Completed"; agent.activityAt = Date.now(); agent.completedAt = Date.now(); changed = true; }
+      if (completed && agent.status === "running") {
+        agent.status = "complete"; agent.activity = "Final handoff is ready in the linked session."; agent.activityType = "Completed"; agent.activityAt = Date.now(); agent.completedAt = Date.now(); changed = true;
+        const result = await boardAgentResult(agent);
+        await processBoardRequests(agent, result);
+        releaseWaitingBoardAgents(agent.id);
+      }
     }
     if (changed) { scheduleAgentBoardSave(); renderAgentBoard(); await scheduleReadyBoardAgents(); }
   }
@@ -1428,6 +1628,7 @@
     try {
       state.browserRuntime = await workspace("/workspace/browser-mode", { method: "POST", body: { visible, directory: state.currentDirectory } });
       renderBrowser();
+      if (visible) focusBrowserWindowSoon();
       toast(visible
         ? "Visible Brave enabled. The agent-controlled window will appear on its next browser action."
         : "Hidden browser mode enabled. The agent browser will run without a visible window.");
@@ -1437,6 +1638,10 @@
       renderBrowser();
       toast(`Could not change browser visibility: ${error.message}`, "error");
     }
+  }
+
+  function focusBrowserWindowSoon() {
+    [900, 2200, 4800, 8500].forEach((delay) => setTimeout(() => workspace("/workspace/browser-focus", { method: "POST", body: {} }).catch(() => null), delay));
   }
 
   async function openBlender() {
@@ -1977,9 +2182,10 @@
       const avatar = role === "user" ? "YOU" : "DS";
       const kind = role === "user" ? "input" : "output";
       const userActions = role === "user" ? '<button type="button" class="message-edit-button" aria-label="Edit this message" title="Edit and retry this message">Edit</button><button type="button" class="message-retry-button" aria-label="Retry this message" title="Retry from this point">Retry</button>' : "";
+      const boardAction = role === "assistant" && messagePlainText(message) ? `<button type="button" class="message-board-button" aria-label="Create an Agent Board from this response" title="Send only this response to the Agent Board"${state.agentBoardDesigning ? " disabled" : ""}>To board</button>` : "";
       const isPinned = pinned.has(info.id);
       const isArchived = archived.has(info.id);
-      const controls = `<span class="message-view-controls">${userActions}<button type="button" class="message-pin-button${isPinned ? " active" : ""}" aria-label="${isPinned ? "Unpin" : "Pin"} this message" title="${isPinned ? "Unpin" : "Pin"} this message">${isPinned ? "Unpin" : "Pin"}</button><button type="button" class="message-archive-button" aria-label="${isArchived ? "Restore" : "Archive"} this message" title="${isArchived ? "Restore" : "Archive"} this message locally">${isArchived ? "Restore" : "Archive"}</button><button type="button" class="message-delete-button" aria-label="Delete this message" title="Delete from this Seneschal view">Delete</button><button type="button" class="message-size-button" aria-label="Minimize ${kind}" title="Minimize or expand ${kind}">Minimize</button><button type="button" class="message-maximize-button" aria-label="Maximize ${kind}" title="Maximize ${kind}">Maximize</button><button type="button" class="message-copy-button" aria-label="Copy ${kind}" title="Copy ${kind}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span></button></span>`;
+      const controls = `<span class="message-view-controls">${userActions}${boardAction}<button type="button" class="message-pin-button${isPinned ? " active" : ""}" aria-label="${isPinned ? "Unpin" : "Pin"} this message" title="${isPinned ? "Unpin" : "Pin"} this message">${isPinned ? "Unpin" : "Pin"}</button><button type="button" class="message-archive-button" aria-label="${isArchived ? "Restore" : "Archive"} this message" title="${isArchived ? "Restore" : "Archive"} this message locally">${isArchived ? "Restore" : "Archive"}</button><button type="button" class="message-delete-button" aria-label="Delete this message" title="Delete from this Seneschal view">Delete</button><button type="button" class="message-size-button" aria-label="Minimize ${kind}" title="Minimize or expand ${kind}">Minimize</button><button type="button" class="message-maximize-button" aria-label="Maximize ${kind}" title="Maximize ${kind}">Maximize</button><button type="button" class="message-copy-button" aria-label="Copy ${kind}" title="Copy ${kind}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span></button></span>`;
       const collapsed = state.collapsedMessageIDs.has(info.id) ? " collapsed" : "";
       const maximized = state.maximizedMessageID === info.id ? " maximized" : "";
       return `<article class="message ${role}${isPinned ? " pinned" : ""}${isArchived ? " archived" : ""}${collapsed}${maximized}" data-message="${escapeHTML(info.id || "")}"><div class="message-avatar">${avatar}</div><div class="message-body"><div class="message-meta"><strong>${escapeHTML(label)}</strong><span>${info.time?.created ? new Date(info.time.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>${controls}</div><div class="message-content">${parts}</div></div></article>`;
@@ -1991,6 +2197,7 @@
     $$(".message-copy-button", els.messageList).forEach((button) => button.addEventListener("click", () => copyRenderedMessage(button)));
     $$(".message-retry-button", els.messageList).forEach((button) => button.addEventListener("click", () => retryUserMessage(button.closest(".message")?.dataset.message)));
     $$(".message-edit-button", els.messageList).forEach((button) => button.addEventListener("click", () => openMessageEditor(button.closest(".message")?.dataset.message)));
+    $$(".message-board-button", els.messageList).forEach((button) => button.addEventListener("click", () => createBoardFromMessage(button.closest(".message")?.dataset.message)));
     $$(".message-pin-button", els.messageList).forEach((button) => button.addEventListener("click", () => toggleMessagePin(button.closest(".message")?.dataset.message)));
     $$(".message-archive-button", els.messageList).forEach((button) => button.addEventListener("click", () => toggleMessageArchive(button.closest(".message")?.dataset.message)));
     $$(".message-delete-button", els.messageList).forEach((button) => button.addEventListener("click", () => openDeleteMessage(button.closest(".message")?.dataset.message)));
@@ -2254,7 +2461,7 @@
     state.currentDirectory = directory;
     state.showArchivedSessions = false;
     storage.set("atelier-directory", directory);
-    const sessions = state.sessions.filter((session) => session.directory === directory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0));
+    const sessions = ordinarySessions().filter((session) => session.directory === directory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0));
     state.currentSessionID = sessions[0]?.id || "";
     storage.set("atelier-session", state.currentSessionID);
     state.messages = [];
@@ -2332,7 +2539,8 @@
     const engineCommand = commandMatch && state.openCodeCommands.find((item) => item.name.toLowerCase() === commandMatch[1].toLowerCase());
     if (engineCommand) return runOpenCodeCommand(engineCommand, commandMatch[2] || "", options);
     clean = await expandSessionReferences(clean);
-    if (state.browserRuntime?.available && !state.browserRuntime.visible && /(?:playw(?:right|rite)|browser|https?:\/\/|(?:open|visit|inspect|test)\s+(?:the\s+)?(?:page|site|website))/i.test(clean)) {
+    const browserTaskRequested = /(?:playw(?:right|rite)|browser|https?:\/\/|(?:open|visit|inspect|test)\s+(?:the\s+)?(?:page|site|website))/i.test(clean);
+    if (state.browserRuntime?.available && !state.browserRuntime.visible && browserTaskRequested) {
       try {
         state.browserRuntime.restarting = true; renderBrowser();
         state.browserRuntime = await workspace("/workspace/browser-mode", { method: "POST", body: { visible: true, directory: state.currentDirectory } });
@@ -2373,6 +2581,7 @@
         directory: session.directory, method: "POST",
         body: { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools: toolOverrides, agent: requestAgent, system: runtimeInstructionSystem() || undefined, parts }
       });
+      if (browserTaskRequested && state.browserRuntime?.visible) focusBrowserWindowSoon();
       log("prompt.accepted", `${model.providerID}/${model.id}`);
       if (options.voice) state.voiceAwaitingResponse = true;
       setTimeout(() => refreshMessages(true), 250);
@@ -2469,7 +2678,7 @@
       storage.set("seneschal-deleted-messages", state.deletedMessages);
       state.pendingDeleteSessionID = "";
       if (wasCurrent) {
-        const next = state.sessions
+        const next = ordinarySessions()
           .filter((item) => item.directory === session.directory && !item.parentID && !state.archivedSessions.has(item.id))
           .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0];
         state.currentSessionID = next?.id || "";
@@ -2921,13 +3130,13 @@
     $("#settingsDeepSeek").textContent = (state.providers.connected || []).includes("deepseek") ? "Connected" : "Ready for key";
     setTalkState(state.voiceSpeaking ? "Speaking" : state.voiceAwaitingResponse ? "Thinking" : state.conversationMode ? "Listening" : "");
     renderActiveSkillCount();
-    $("#settingsArchives").textContent = `${state.archivedSessions.size} archived`;
+    $("#settingsArchives").textContent = `${ordinarySessions().filter((session) => state.archivedSessions.has(session.id)).length} archived`;
     renderAgentBoard(); renderVsCode();
     els.settingsDialog.showModal();
   }
 
   function renderArchiveManager() {
-    const archived = state.sessions
+    const archived = ordinarySessions()
       .filter((session) => state.archivedSessions.has(session.id) && !session.parentID)
       .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0));
     $("#settingsArchives").textContent = `${archived.length} archived`;
@@ -3103,7 +3312,7 @@
       { icon: "↗", title: "Classic OpenCode", subtitle: "Open the original control surface", kind: "Action", run: openClassic }
     ];
     const engineCommands = state.openCodeCommands.map((command) => ({ icon: "/", title: `/${command.name}`, subtitle: command.description || `${command.source || "OpenCode"} command`, kind: command.source === "skill" ? "Skill" : "Command", search: `${command.name} ${(command.hints || []).join(" ")}`, run: () => chooseOpenCodeCommand(command) }));
-    const sessions = state.sessions.flatMap((session) => ([
+    const sessions = ordinarySessions().flatMap((session) => ([
       { icon: "S", title: session.title || "Untitled session", subtitle: `Open · ${basename(session.directory)}`, kind: "Session", run: () => selectSession(session.id) },
       { icon: "@", title: `Reference: ${session.title || "Untitled session"}`, subtitle: "Bring this conversation into the current prompt", kind: "Reference", run: () => insertSessionReference(session) }
     ]));
@@ -3172,7 +3381,7 @@
       if (!state.currentDirectory || !availableDirectories.includes(state.currentDirectory)) state.currentDirectory = availableDirectories[0] || "";
       if (requestedSessionID && sessions.some((session) => session.id === requestedSessionID)) state.currentSessionID = requestedSessionID;
       const currentExists = sessions.some((session) => session.id === state.currentSessionID && session.directory === state.currentDirectory);
-      if (!currentExists) state.currentSessionID = sessions.filter((session) => session.directory === state.currentDirectory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0]?.id || "";
+      if (!currentExists) state.currentSessionID = ordinarySessions().filter((session) => session.directory === state.currentDirectory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0]?.id || "";
       if (state.launchSelection?.directory || state.launchSelection?.sessionID) {
         state.launchSelection = null;
         storage.set("atelier-projects", state.customDirectories);
@@ -3209,6 +3418,7 @@
     $("#settingsButton").addEventListener("click", openSettings);
     $("#agentBoardButton").addEventListener("click", openAgentBoard);
     $("#agentBoardRailButton").addEventListener("click", openAgentBoard);
+    $("#agentBoardHistoryRailButton").addEventListener("click", openAgentBoardHistory);
     $("#settingsRailButton").addEventListener("click", openSettings);
     $("#instructionsRailButton").addEventListener("click", () => openInstructionStudio("persona"));
     $("#chatGPTRailButton").addEventListener("click", openChatGPTSpace);
@@ -3270,6 +3480,8 @@
     $("#sendSessionToBoardButton").addEventListener("click", importCurrentSessionToBoard);
     $("#closeAgentBoardButton").addEventListener("click", () => els.agentBoardDialog.close());
     $("#agentBoardImportButton").addEventListener("click", importCurrentSessionToBoard);
+    $("#agentBoardHistoryButton").addEventListener("click", openAgentBoardHistory);
+    $("#closeAgentBoardHistoryButton").addEventListener("click", () => els.agentBoardHistoryDialog.close());
     $("#agentBoardAddButton").addEventListener("click", () => openAgentEditor());
     $("#agentBoardTemplateButton").addEventListener("click", createStarterBoard);
     $("#agentBoardRunButton").addEventListener("click", runAgentBoard);
@@ -3364,7 +3576,7 @@
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommands(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newSession(); }
     });
-    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, els.messageEditDialog, els.browserDialog, els.vscodeDialog, els.agentEditorDialog, els.agentBoardDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
+    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, els.messageEditDialog, els.browserDialog, els.vscodeDialog, els.agentEditorDialog, els.agentBoardDialog, els.agentBoardHistoryDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
     els.instructionDialog.addEventListener("click", (event) => { if (event.target === els.instructionDialog) closeInstructionStudio(); });
     document.addEventListener("visibilitychange", syncMotionState);
     window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); stopAgentBoardMonitor(); });
@@ -3375,6 +3587,7 @@
     setTheme(savedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day"));
     setMotion(state.motion);
     syncPanelState();
+    syncInspectorSections();
     state.conversationMode = false;
     storage.set("seneschal-talk-mode", false);
     setTalkState();

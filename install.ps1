@@ -176,6 +176,7 @@ if ($migrationVerified) {
     'Seneschal v0.2.1 Beta 9',
     'Seneschal v0.2.1 Beta 10',
     'Seneschal v0.2.1 Beta 11',
+    'Seneschal v0.2.1 Beta 12',
     'seneschal-v0.2.0-beta.1.zip',
     'seneschal-v0.2.1-beta.1.zip',
     'seneschal-v0.2.1-beta.2.zip',
@@ -187,7 +188,8 @@ if ($migrationVerified) {
     'seneschal-v0.2.1-beta.8.zip',
     'seneschal-v0.2.1-beta.9.zip',
     'seneschal-v0.2.1-beta.10.zip',
-    'seneschal-v0.2.1-beta.11.zip'
+    'seneschal-v0.2.1-beta.11.zip',
+    'seneschal-v0.2.1-beta.12.zip'
   )) {
     $obsoletePath = Join-Path $desktop $obsoleteDesktopItem
     if (Test-Path -LiteralPath $obsoletePath) { Remove-Item -Recurse -Force -LiteralPath $obsoletePath }

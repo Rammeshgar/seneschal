@@ -10,6 +10,7 @@ let sessionCounter = 0;
 const sessions = [];
 const statuses = {};
 const messages = {};
+const fixtureBoard = { version: 3, id: "fixture-board", title: "Launch the Seneschal beta", directory: "/home/demo/projects/seneschal", objective: "Prepare, verify, and publish a reliable Seneschal release.", concurrency: 3, active: false, paused: false, createdAt: Date.now() - 7200000, updatedAt: Date.now() - 1800000, agents: [], communications: [] };
 const files = new Map([
   ["/", ["app/index.html", "text/html; charset=utf-8"]],
   ["/workspace/app.js", ["app/app.js", "application/javascript; charset=utf-8"]],
@@ -89,7 +90,9 @@ const server = http.createServer((request, response) => {
   if (url.pathname === "/workspace/browser-mode") return json(response, { available: true, visible: true, visibilityAware: true, restarting: false });
   if (url.pathname === "/workspace/vscode") return json(response, { available: true, remote: "wsl+Ubuntu", companionAvailable: true });
   if (url.pathname === "/workspace/usage") return json(response, { budget: 10, cost: 0.25, percent: 3 });
-  if (url.pathname === "/workspace/agent-board") return json(response, { version: 2, directory: "/home/demo/projects/seneschal", objective: "", concurrency: 2, active: false, paused: false, agents: [] });
+  if (url.pathname === "/workspace/agent-board/history/restore" && request.method === "POST") return readBody(request, () => json(response, fixtureBoard));
+  if (url.pathname === "/workspace/agent-board/history") return json(response, { boards: [{ id: fixtureBoard.id, title: fixtureBoard.title, objective: fixtureBoard.objective, directory: fixtureBoard.directory, agentCount: 4, createdAt: fixtureBoard.createdAt, updatedAt: fixtureBoard.updatedAt }] });
+  if (url.pathname === "/workspace/agent-board") return json(response, fixtureBoard);
   if (url.pathname === "/workspace/instructions") return json(response, emptyInstructionSnapshot);
   return json(response, { ok: true }, 200);
 });
