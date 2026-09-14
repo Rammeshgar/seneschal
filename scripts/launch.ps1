@@ -11,8 +11,12 @@ try {
   $node = Get-Command node.exe -ErrorAction Stop
   Push-Location $root
   try {
-    & $node.Source (Join-Path $root 'server.js') *>> $runLog
-    $exitCode = $LASTEXITCODE
+    # PowerShell 5.1 treats native stderr warnings as errors; use the exit code.
+    $ErrorActionPreference = 'Continue'
+    try {
+      & $node.Source (Join-Path $root 'server.js') *>> $runLog
+      $exitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = 'Stop' }
   } finally {
     Pop-Location
   }
@@ -21,9 +25,11 @@ try {
   Add-Content -Encoding utf8 -LiteralPath $runLog -Value $_.Exception.Message
   Add-Content -Encoding utf8 -LiteralPath $log -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Launch failed; see $runLog"
   Add-Type -AssemblyName PresentationFramework
+  $started = (Test-Path -LiteralPath $runLog) -and (Select-String -LiteralPath $runLog -Pattern 'Seneschal: http' -Quiet)
+  $failureTitle = if ($started) { 'Seneschal stopped unexpectedly' } else { 'Seneschal could not start' }
   [System.Windows.MessageBox]::Show(
-    "Seneschal could not start. Details were saved to $runLog",
-    'Seneschal could not start'
+    "$failureTitle. Details were saved to $runLog",
+    $failureTitle
   ) | Out-Null
   exit 1
 }

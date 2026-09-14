@@ -105,7 +105,8 @@
             <div><span class="eyebrow" id="projectEyebrow">PROJECT</span><h1 id="sessionTitle">New session</h1></div>
             <div class="session-actions">
               <span class="status-chip" id="sessionStatus"><i></i><span>Idle</span></span>
-              <button class="icon-button" id="renameSessionButton" title="Rename session"><svg viewBox="0 0 24 24"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button>
+              <button class="icon-button" id="renameSessionButton" aria-label="Rename session" title="Rename session"><svg viewBox="0 0 24 24"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button>
+              <button class="icon-button" id="moveSessionButton" aria-label="Move session to another project" title="Move session to another project"><svg viewBox="0 0 24 24"><path d="M3 7V4h6l2 3h10v13H3zM8 13h9m-3-3 3 3-3 3"/></svg></button>
               <button class="icon-button" id="exportSessionButton" title="Export conversation" aria-label="Export conversation"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button>
               <button class="icon-button" id="sendSessionToBoardButton" title="Send this session to Agent Board" aria-label="Send current session to Agent Board"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="15" width="7" height="6" rx="1"/><path d="M6.5 10v2.5H12V15m5.5-5v2.5H12"/></svg></button>
               <button class="icon-button" id="openSessionVsCodeButton" title="Open project in VS Code" aria-label="Open current project in Visual Studio Code"><svg viewBox="0 0 24 24"><path d="m17 3 4 2v14l-4 2-9-7-4 3-2-1V8l2-1 4 3 9-7Z"/><path d="m8 10 9-5v14l-9-5Z"/></svg></button>
@@ -243,6 +244,24 @@
 
     <button class="mobile-inspector-button" id="openInspectorButton" aria-label="Open agent context"><span></span>Context</button>
 
+    <dialog class="modal" id="renameSessionDialog" aria-labelledby="renameSessionHeading">
+      <form id="renameSessionForm">
+        <div class="modal-kicker">SESSION DETAILS</div><h2 id="renameSessionHeading">Give it a name</h2>
+        <label>Session name<input id="sessionTitleInput" required maxlength="200" autocomplete="off" /></label>
+        <div class="modal-error" id="renameSessionError" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" id="cancelSessionRename" class="secondary-button">Cancel</button><button type="submit" id="saveSessionTitleButton" class="primary-button">Save name</button></div>
+      </form>
+    </dialog>
+    <dialog class="modal" id="moveSessionDialog" aria-labelledby="moveSessionHeading">
+      <form id="moveSessionForm">
+        <div class="modal-kicker">PROJECT ORGANIZATION</div><h2 id="moveSessionHeading">Move this session</h2>
+        <p>Organize this conversation under another project. History, pins, and the selected model stay with it. Its working folder and files do not move.</p>
+        <p>Tools will continue working in <strong id="moveSessionWorkingFolder"></strong>. To work in the destination folder, start a new session there.</p>
+        <label>Destination project<select id="moveSessionProject" required></select></label>
+        <div class="modal-error" id="moveSessionError" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" id="cancelSessionMove" class="secondary-button">Cancel</button><button type="submit" id="confirmMoveSessionButton" class="primary-button">Move session</button></div>
+      </form>
+    </dialog>
     <dialog class="modal" id="projectDialog">
       <form method="dialog" id="projectForm">
         <div class="modal-kicker">NEW WORKSPACE</div>
@@ -490,6 +509,7 @@
         </section>
         <div class="agent-board-notice"><i></i><span>Each card is a real session. Models and access are chosen per agent. You see provider-supplied summaries and tool activity—not private chain-of-thought.</span></div>
         <section class="agent-board-guide" id="agentBoardGuide">
+          <details id="boardSelectedPlan" hidden><summary>Read the selected plan</summary><pre id="boardSelectedPlanText"></pre></details>
           <div><b>1</b><span><strong>Send one plan</strong><small>Use “To board” on a planning response. Seneschal reads only that chosen message.</small></span></div>
           <div><b>2</b><span><strong>Review the generated team</strong><small>An architect proposes the roles, tasks, models, access, dependencies, and parallel work.</small></span></div>
           <div><b>3</b><span><strong>Run and supervise</strong><small>Agents exchange visible requests. The Supervisor can return weak work for another pass.</small></span></div>

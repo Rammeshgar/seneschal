@@ -43,6 +43,22 @@ const instructionJournalFile = path.join(instructionBackupDirectory, "journal.js
 const agentBoardFile = path.join(dataDirectory, "agent-board.json");
 const agentBoardHistoryDirectory = path.join(dataDirectory, "agent-board-history");
 const maximumInstructionBytes = 256 * 1024;
+const prismPort = 1235;
+const prismRuntimeDirectory = path.join(installDirectory, "local-runtime", "prism");
+const prismServerExecutable = path.join(prismRuntimeDirectory, process.platform === "win32" ? "llama-server.exe" : "llama-server");
+const ternaryBonsaiWeights = path.join(os.homedir(), ".lmstudio", "models", "prism-ml", "Ternary-Bonsai-27B-gguf", "Ternary-Bonsai-27B-PQ2_0.gguf");
+const wslHostAddress = process.env.SENESCHAL_WSL_HOST || localSettings.wslHostAddress || detectWslHostAddress();
+let bonsaiRuntime = null;
+
+function detectWslHostAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const [name, addresses] of Object.entries(interfaces)) {
+    if (!/wsl/i.test(name)) continue;
+    const ipv4 = (addresses || []).find((address) => (address.family === "IPv4" || address.family === 4) && !address.internal);
+    if (ipv4?.address) return ipv4.address;
+  }
+  return host;
+}
 
 fs.mkdirSync(instructionDataDirectory, { recursive: true });
 fs.mkdirSync(instructionBackupDirectory, { recursive: true });
@@ -63,6 +79,7 @@ function localSecret(filename, bytes = 32) {
 }
 
 const workspaceToken = localSecret("workspace-token.txt");
+const prismApiKey = localSecret("prism-api-key.txt", 24);
 const upstreamPassword = localSecret("server-password.txt", 24);
 const upstreamUsername = "opencode";
 const upstreamAuthorization = `Basic ${Buffer.from(`${upstreamUsername}:${upstreamPassword}`).toString("base64")}`;
@@ -219,8 +236,53 @@ function startUpstream() {
 }
 
 function ensureOpenCodeModelCatalog() {
-  // OpenCode owns its live provider catalogue. Seneschal reads that
-  // catalogue through the local API and never rewrites model availability.
+  try {
+    if (!fs.existsSync(openCodeConfigFile)) return;
+    const original = fs.readFileSync(openCodeConfigFile, "utf8");
+    const normalizedOriginal = original.replace(/^(?:\uFEFF|ï»¿)+/, "");
+    const config = JSON.parse(normalizedOriginal);
+    config.provider = config.provider && typeof config.provider === "object" ? config.provider : {};
+
+    const openai = config.provider.openai && typeof config.provider.openai === "object" ? config.provider.openai : {};
+    openai.models = openai.models && typeof openai.models === "object" ? openai.models : {};
+    openai.models["gpt-6-astra"] = {
+      ...(openai.models["gpt-6-astra"] || {}),
+      name: "GPT-6 Astra",
+      limit: { context: 1050000, output: 128000 },
+      variants: {
+        low: { reasoningEffort: "low" },
+        medium: { reasoningEffort: "medium" },
+        high: { reasoningEffort: "high" },
+        xhigh: { reasoningEffort: "xhigh" },
+        max: { reasoningEffort: "max" }
+      }
+    };
+    config.provider.openai = openai;
+
+    if (fs.existsSync(ternaryBonsaiWeights)) {
+      const bonsai = config.provider.bonsai && typeof config.provider.bonsai === "object" ? config.provider.bonsai : {};
+      bonsai.npm = "@ai-sdk/openai-compatible";
+      bonsai.name = "PrismML (local)";
+      bonsai.options = { ...(bonsai.options || {}), baseURL: `http://${wslHostAddress}:${prismPort}/v1`, apiKey: prismApiKey };
+      bonsai.models = bonsai.models && typeof bonsai.models === "object" ? bonsai.models : {};
+      bonsai.models["ternary-bonsai-27b"] = {
+        ...(bonsai.models["ternary-bonsai-27b"] || {}),
+        name: "Ternary Bonsai 27B (local)",
+        limit: { context: 4096, output: 2048 }
+      };
+      config.provider.bonsai = bonsai;
+    }
+
+    const updated = `${JSON.stringify(config, null, 2)}\n`;
+    if (updated === original) return;
+    const backup = `${openCodeConfigFile}.before-seneschal-models`;
+    if (!fs.existsSync(backup)) fs.copyFileSync(openCodeConfigFile, backup);
+    const pending = `${openCodeConfigFile}.${process.pid}.tmp`;
+    fs.writeFileSync(pending, updated, "utf8");
+    fs.renameSync(pending, openCodeConfigFile);
+  } catch (error) {
+    console.warn(`Seneschal could not register current models in OpenCode: ${error.message}`);
+  }
 }
 
 function waitForUpstream(attempt = 0) {
@@ -603,6 +665,65 @@ function runCommand(command, args, callback, options = {}) {
   child.on("close", (code) => callback(code === 0 ? null : new Error(stderr || `${command} exited with ${code}`), stdout));
 }
 
+function localPortReady(port, callback, connectionHost = host) {
+  const socket = net.connect({ host: connectionHost, port });
+  let settled = false;
+  const finish = (ready) => {
+    if (settled) return;
+    settled = true;
+    socket.destroy();
+    callback(ready);
+  };
+  socket.setTimeout(600);
+  socket.once("connect", () => finish(true));
+  socket.once("timeout", () => finish(false));
+  socket.once("error", () => finish(false));
+}
+
+function waitForLocalBonsai(callback, attempt = 0) {
+  localPortReady(prismPort, (ready) => {
+    if (ready) return callback(null, { ready: true, provider: "bonsai", model: "ternary-bonsai-27b", host: wslHostAddress, sleepsAfterIdleSeconds: 600 });
+    if (attempt >= 180) return callback(new Error("Ternary Bonsai took too long to start. See data/bonsai-runtime.log."));
+    setTimeout(() => waitForLocalBonsai(callback, attempt + 1), 500);
+  }, wslHostAddress);
+}
+
+function prepareLocalBonsai(callback) {
+  if (!fs.existsSync(ternaryBonsaiWeights)) return callback(new Error("The Ternary Bonsai 27B PQ2_0 model was not found in Bionic's model folder."));
+  if (!fs.existsSync(prismServerExecutable)) return callback(new Error("The PrismML runtime for Ternary Bonsai is not installed in Seneschal."));
+  localPortReady(prismPort, (ready) => {
+    if (ready) return waitForLocalBonsai(callback);
+    let completed = false;
+    const done = (error, status) => {
+      if (completed) return;
+      completed = true;
+      callback(error, status);
+    };
+    const logFile = path.join(dataDirectory, "bonsai-runtime.log");
+    const log = fs.openSync(logFile, "a");
+    bonsaiRuntime = spawn(prismServerExecutable, [
+      "-m", ternaryBonsaiWeights,
+      "-c", "4096",
+      "-np", "1",
+      "-ngl", "auto",
+      "-a", "ternary-bonsai-27b",
+      "--host", wslHostAddress,
+      "--port", String(prismPort),
+      "--api-key", prismApiKey,
+      "--reasoning", "off",
+      "--reasoning-budget", "0",
+      "--sleep-idle-seconds", "600"
+    ], { cwd: prismRuntimeDirectory, windowsHide: true, stdio: ["ignore", log, log] });
+    fs.closeSync(log);
+    bonsaiRuntime.once("error", (error) => done(error));
+    bonsaiRuntime.once("exit", (code) => {
+      bonsaiRuntime = null;
+      if (code && code !== 0) console.warn(`Ternary Bonsai runtime exited with code ${code}.`);
+    });
+    waitForLocalBonsai(done);
+  }, wslHostAddress);
+}
+
 function readAgentBoard() {
   try {
     const board = JSON.parse(fs.readFileSync(agentBoardFile, "utf8"));
@@ -799,6 +920,30 @@ function restartPlaywrightBridge(directory, callback) {
 
 function handleWorkspaceEndpoint(request, response, pathname) {
   const requestUrl = new URL(request.url, `http://${request.headers.host || `${host}:${publicPort}`}`);
+  if (pathname === "/workspace/session-projects") {
+    const filename = path.join(dataDirectory, "session-projects.json");
+    const readAssignments = () => fs.existsSync(filename) ? JSON.parse(fs.readFileSync(filename, "utf8")) : {};
+    if (request.method === "GET") {
+      try { return json(response, 200, readAssignments()); } catch (error) { return endpointError(response, error); }
+    }
+    if (request.method === "POST") {
+      readJsonBody(request, (error, body) => {
+        if (error) return endpointError(response, error);
+        try {
+          if (typeof body.sessionID !== "string" || !/^ses[a-zA-Z0-9_-]+$/.test(body.sessionID) || body.sessionID.length > 256) throw new Error("Invalid session ID. Reload Seneschal and select the session again.");
+          // This is an organizational identifier stored as JSON, not a filesystem destination.
+          // Existing project entries may be relative names or Windows paths as well as WSL paths.
+          if (typeof body.directory !== "string" || !body.directory.trim() || body.directory.length > 4096 || /[\x00-\x1f\x7f]/.test(body.directory)) throw new Error("Invalid destination project. Choose a non-empty project without control characters.");
+          const assignments = readAssignments(); assignments[body.sessionID] = body.directory;
+          const pending = `${filename}.tmp`;
+          fs.writeFileSync(pending, JSON.stringify(assignments, null, 2), "utf8");
+          fs.renameSync(pending, filename);
+          return json(response, 200, assignments);
+        } catch (failure) { return endpointError(response, failure); }
+      });
+      return true;
+    }
+  }
   if (pathname === "/workspace/approval-policy" && request.method === "GET") {
     try {
       const config = JSON.parse(fs.readFileSync(openCodeConfigFile, "utf8"));
@@ -897,6 +1042,10 @@ function handleWorkspaceEndpoint(request, response, pathname) {
   }
   if (pathname === "/workspace/blender-health" && request.method === "GET") {
     blenderHealth((status) => json(response, 200, status));
+    return true;
+  }
+  if (pathname === "/workspace/local-model/prepare" && request.method === "POST") {
+    prepareLocalBonsai((error, status) => error ? endpointError(response, error) : json(response, 200, status));
     return true;
   }
   if (pathname === "/workspace/agent-board" && request.method === "GET") {
@@ -1123,6 +1272,7 @@ function shutdown(code = 0) {
   proxy?.close();
   classicProxy?.close();
   if (upstream && !upstream.killed) upstream.kill();
+  if (bonsaiRuntime && !bonsaiRuntime.killed) bonsaiRuntime.kill();
   setTimeout(() => process.exit(code), 180);
 }
 

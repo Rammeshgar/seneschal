@@ -30,11 +30,23 @@ test("release has no original machine paths or credentials", () => {
   assert.doesNotMatch(combined, /BA72-B89B/);
 });
 
-test("machine settings and live providers are discovered instead of rewritten", () => {
+test("machine settings are discovered and requested model additions preserve provider config", () => {
   const server = read("server.js");
   assert.match(server, /settings\.json/);
   assert.match(server, /SENESCHAL_WSL_DISTRO/);
-  assert.match(server, /never rewrites model availability/);
+  assert.match(server, /openai\.models\["gpt-6-astra"\]/);
+  assert.match(server, /original\.replace\(\/\^\(\?:\\uFEFF\|ï»¿\)\+\//);
+  assert.match(server, /Ternary-Bonsai-27B-PQ2_0\.gguf/);
+  assert.match(server, /bonsai\.models\["ternary-bonsai-27b"\]/);
+  assert.match(server, /\/workspace\/local-model\/prepare/);
+  assert.match(server, /detectWslHostAddress/);
+  assert.match(server, /baseURL: `http:\/\/\$\{wslHostAddress\}:\$\{prismPort\}\/v1`/);
+  assert.match(server, /"--host", wslHostAddress/);
+  assert.match(server, /"--api-key", prismApiKey/);
+  assert.match(server, /"--reasoning", "off"/);
+  assert.match(server, /"--sleep-idle-seconds", "600"/);
+  assert.match(server, /\.before-seneschal-models/);
+  assert.match(server, /fs\.renameSync\(pending, openCodeConfigFile\)/);
   assert.doesNotMatch(server, /delete config\.provider/);
 });
 
@@ -157,6 +169,16 @@ test("model choices are isolated per session and background work survives naviga
   assert.doesNotMatch(selectSession, /\/abort/);
 });
 
+test("current OpenAI and configured local Ternary models are available in Seneschal", () => {
+  const app = read("app/app.js");
+  assert.match(app, /openai: \["gpt-6-astra", "gpt-5\.6-terra"/);
+  assert.match(app, /currentOpenAIModels/);
+  assert.match(app, /providerModels\.push\(model\)/);
+  assert.match(app, /bonsai: \["ternary-bonsai-27b"\]/);
+  assert.match(app, /configuredLocal = provider\.id === "bonsai" && provider\.source === "custom"/);
+  assert.match(app, /\["openai", "bonsai", "google", "opencode", "deepseek"\]/);
+});
+
 test("Agent Board coordinates real sessions with persistent dependency handoffs", () => {
   const html = read("app/index.html");
   const app = read("app/app.js");
@@ -213,6 +235,15 @@ test("sidebars keep their own controls and independently minimized sections", ()
   assert.match(app, /inspectorSections/);
   assert.match(app, /syncInspectorSections/);
   assert.match(styles, /inspector-block\.collapsed/);
+});
+
+test("composer controls wrap cleanly when zoom reduces available width", () => {
+  const styles = read("app/styles.css");
+  assert.match(styles, /\.composer \{[^}]*container-type: inline-size/);
+  assert.match(styles, /\.composer-footer \{[^}]*flex-wrap: wrap/);
+  assert.match(styles, /\.composer-tools \{[^}]*flex-wrap: wrap/);
+  assert.match(styles, /@container \(max-width: 720px\)/);
+  assert.match(styles, /\.send-group \{ width: 100%; justify-content: flex-end; \}/);
 });
 
 test("Visual Studio Code bridge opens WSL projects and provides an in-editor AI workspace", () => {

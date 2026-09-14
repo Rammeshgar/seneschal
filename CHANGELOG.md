@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1-beta.16 — 2026-09-15
+
+- Make session renaming open reliably and add persistent project organization without changing a session's original tool working folder.
+- Store project assignments in Seneschal's local data so engine refreshes cannot silently undo them; support WSL paths, Windows paths, and existing named project entries.
+- Preserve the exact selected plan when sending one response to Agent Board and save a usable default team before optional AI customization.
+- Prevent old or partial assistant replies from completing a new board run, enforce the configured parallel-agent limit, and make stop controls cover agents that are still starting.
+- Improve conversation readability, responsive composer wrapping, narrow-window inspector behavior, and visual distinction between navigation, board, and inspector sections.
+- Add GPT-6 Astra to the requested OpenAI catalog and the locally configured quantized Ternary Bonsai 27B runtime.
+- Improve hidden-launcher diagnostics and avoid treating harmless native stderr warnings as startup failures under Windows PowerShell 5.1.
+- Add behavior tests for durable project assignment, exact plan handoff, current-run completion, and parallel scheduling.
+
 ## 0.2.1-beta.15 — 2026-08-31
 
 - Separate Agent Board history and its internal worker sessions from ordinary Sessions, pinned Sessions, archives, project counts, and command search.

@@ -13,6 +13,7 @@
     path: null,
     config: {},
     sessions: [],
+    sessionProjects: {},
     statuses: {},
     providers: { all: [], connected: [], default: {} },
     models: [],
@@ -223,7 +224,16 @@
     return new Date(timestamp).toLocaleDateString([], { month: "short", day: "numeric" });
   }
 
+  function normalizeSession(session) {
+    if (state.sessionProjects[session?.id]) return { ...session, projectDirectory: state.sessionProjects[session.id] };
+    if (typeof session?.metadata?.seneschalDirectory === "string" && session.metadata.seneschalDirectory.startsWith("/")) {
+      return { ...session, projectDirectory: session.metadata.seneschalDirectory };
+    }
+    return session;
+  }
   function selectedSession() { return state.sessions.find((session) => session.id === state.currentSessionID); }
+  function sessionProject(session) { return session.projectDirectory || session.directory; }
+  function workingDirectory() { return selectedSession()?.directory || state.currentDirectory; }
   function isBoardSession(session) {
     if (!session) return false;
     if (/^\[(?:Board|Board Architect)\]\s/i.test(String(session.title || ""))) return true;
@@ -715,7 +725,7 @@
   }
 
   function directories() {
-    const list = [state.currentDirectory, state.path?.directory, ...state.customDirectories, ...state.sessions.map((s) => s.directory)].filter(Boolean);
+    const list = [state.currentDirectory, state.path?.directory, ...state.customDirectories, ...state.sessions.map(sessionProject)].filter(Boolean);
     return [...new Set(list)].filter((directory) => !state.excludedProjects.has(directory));
   }
 
@@ -758,7 +768,7 @@
   function renderProjects() {
     const dirs = directories();
     els.projectList.innerHTML = dirs.length ? dirs.map((dir) => {
-      const count = ordinarySessions().filter((session) => session.directory === dir && !session.parentID).length;
+      const count = ordinarySessions().filter((session) => sessionProject(session) === dir && !session.parentID).length;
       const active = dir === state.currentDirectory ? " active" : "";
       const title = basename(dir);
       return `<div class="project-row${active}"><button class="project-item${active}" data-directory="${escapeHTML(dir)}" title="Open ${escapeHTML(dir)}"><span class="project-glyph">${escapeHTML(title.slice(0,1).toUpperCase())}</span><span>${escapeHTML(title)}</span><small>${count}</small></button><button class="project-delete-button" type="button" data-delete-project="${escapeHTML(dir)}" aria-label="Delete ${escapeHTML(title)} from Seneschal" title="Remove project from Seneschal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></div>`;
@@ -820,7 +830,7 @@
     if (!state.archivedSessions.size) state.showArchivedSessions = false;
     if (active && state.currentSessionID === sessionID) {
       const next = ordinarySessions()
-        .filter((session) => session.directory === state.currentDirectory && !session.parentID && !state.archivedSessions.has(session.id))
+        .filter((session) => sessionProject(session) === state.currentDirectory && !session.parentID && !state.archivedSessions.has(session.id))
         .sort((a, b) => Number(state.pinnedSessions.has(b.id)) - Number(state.pinnedSessions.has(a.id)) || (b.time?.updated || 0) - (a.time?.updated || 0))[0];
       state.currentSessionID = next?.id || "";
       state.messages = [];
@@ -853,7 +863,7 @@
 
   function renderSessions() {
     const allSessions = ordinarySessions()
-      .filter((session) => session.directory === state.currentDirectory && !session.parentID)
+      .filter((session) => sessionProject(session) === state.currentDirectory && !session.parentID)
       .sort((a, b) => Number(state.pinnedSessions.has(b.id)) - Number(state.pinnedSessions.has(a.id)) || (b.time?.updated || 0) - (a.time?.updated || 0));
     const archivedCount = allSessions.filter((session) => state.archivedSessions.has(session.id)).length;
     const pinnedSessions = allSessions.filter((session) => state.pinnedSessions.has(session.id) && !state.archivedSessions.has(session.id));
@@ -876,19 +886,37 @@
     const connected = new Set(state.providers.connected || []);
     const curated = {
       google: ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash-lite"],
-      openai: ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-sol"],
+      openai: ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-sol"],
+      bonsai: ["ternary-bonsai-27b"],
       deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"]
     };
+    const currentOpenAIModels = [{
+      id: "gpt-6-astra",
+      providerID: "openai",
+      name: "GPT-6 Astra",
+      family: "gpt-astra",
+      api: { id: "gpt-6-astra", npm: "@ai-sdk/openai", url: "" },
+      capabilities: { temperature: false, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: true, video: false, pdf: true }, output: { text: true, audio: false, image: false, video: false, pdf: false } },
+      cost: { input: 10, output: 50, cache: { read: 1, write: 0 } },
+      limit: { context: 1050000, input: 922000, output: 128000 },
+      status: "active",
+      variants: Object.fromEntries(["low", "medium", "high", "xhigh", "max"].map((reasoningEffort) => [reasoningEffort, { reasoningEffort, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] }]))
+    }];
     const list = [];
     for (const provider of state.providers.all || []) {
-      if (connected.size && !connected.has(provider.id)) continue;
-      for (const model of Object.values(provider.models || {})) {
+      const configuredLocal = provider.id === "bonsai" && provider.source === "custom";
+      if (connected.size && !connected.has(provider.id) && !configuredLocal) continue;
+      const providerModels = Object.values(provider.models || {});
+      if (provider.id === "openai") currentOpenAIModels.forEach((model) => {
+        if (!providerModels.some((candidate) => candidate.id === model.id)) providerModels.push(model);
+      });
+      for (const model of providerModels) {
         if (curated[provider.id] && !curated[provider.id].includes(model.id)) continue;
         if (!(model.capabilities?.input?.text ?? true) || !(model.capabilities?.toolcall ?? model.tool_call ?? true)) continue;
         list.push({ ...model, providerID: model.providerID || provider.id, providerName: provider.name, value: `${model.providerID || provider.id}/${model.id}` });
       }
     }
-    const providerOrder = ["openai", "google", "opencode", "deepseek"];
+    const providerOrder = ["openai", "bonsai", "google", "opencode", "deepseek"];
     return list.sort((a, b) => {
       const pa = curated[a.providerID]?.indexOf(a.id) ?? 99;
       const pb = curated[b.providerID]?.indexOf(b.id) ?? 99;
@@ -953,7 +981,7 @@
     if (inputs.audio) parts.push("audio");
     if (capabilities.toolcall || model.tool_call) parts.push("tools");
     els.capability.textContent = parts.join(" + ");
-    const colors = { openai: "var(--forest)", google: "var(--cobalt)", anthropic: "var(--clay)", "hpc-ai": "var(--ochre)" };
+    const colors = { openai: "var(--forest)", bonsai: "var(--ochre)", google: "var(--cobalt)", anthropic: "var(--clay)", "hpc-ai": "var(--ochre)" };
     els.providerOrb.style.background = colors[model.providerID] || "var(--cobalt)";
   }
 
@@ -1173,6 +1201,8 @@
     els.agentBoardConcurrency.value = String(board.concurrency);
     els.agentBoardState.className = `board-state ${state.agentBoardDesigning ? "running" : board.active ? board.paused ? "paused" : "running" : ""}`;
     els.agentBoardState.innerHTML = `<i></i>${state.agentBoardDesigning ? "Designing team" : board.active ? board.paused ? "Paused" : "Running" : "Idle"}`;
+    $("#boardSelectedPlan").hidden = !board.planText;
+    $("#boardSelectedPlanText").textContent = board.planText || "";
     const columnDefinitions = [
       ["ready", "Ready", "Agents whose dependencies are complete."], ["waiting", "Waiting", "Blocked until another agent finishes."],
       ["running", "Running", "Independent OpenCode sessions working now."], ["done", "Done", "Completed or failed agents with retained sessions."]
@@ -1342,6 +1372,7 @@
         api(`/session/${encodeURIComponent(sessionID)}/message`, { directory }).catch(() => [])
       ]);
       const assistant = [...messages].reverse().find((item) => item.info?.role === "assistant");
+      if (assistant?.info?.error) throw new Error(assistant.info.error.data?.message || assistant.info.error.message || "The architect's model failed.");
       lastText = messagePlainText(assistant) || lastText;
       const entry = statuses[sessionID]; const status = typeof entry === "string" ? entry : entry?.type || entry?.status;
       if (lastText && status === "idle") return lastText;
@@ -1364,7 +1395,8 @@
     const rawAgents = design.agents.slice(0, 8); const keyMap = new Map(); const keyIndexes = new Map();
     const normalizedKeys = rawAgents.map((raw, index) => {
       const base = String(raw.key || raw.name || `agent-${index}`).toLowerCase(); let key = base;
-      while (keyMap.has(key)) key = `${base}-${index + 1}`;
+      let suffix = index + 1;
+      while (keyMap.has(key)) key = `${base}-${suffix++}`;
       keyMap.set(key, `agent-${crypto.randomUUID()}`); if (!keyIndexes.has(base)) { keyMap.set(base, keyMap.get(key)); keyIndexes.set(base, index); } keyIndexes.set(key, index); return key;
     });
     const sourceID = `agent-${crypto.randomUUID()}`;
@@ -1390,20 +1422,31 @@
   }
 
   async function createBoardFromMessage(messageID) {
+    if (state.agentBoardDesigning) return;
     const message = state.messages.find((item) => item.info?.id === messageID);
     const planText = messagePlainText(message);
     const origin = selectedSession();
     if (!origin || !planText) { toast("This response has no plan text to send.", "warn"); return; }
+    if (planText.length > 50000) { toast("This plan is too long for a reliable handoff. Select a plan summary under 50,000 characters.", "warn"); return; }
     if (state.agentBoard.agents.some((agent) => agent.status === "running")) { toast("Stop the running board before replacing it with a new plan.", "warn"); return; }
     if (state.agentBoard.agents.length && !confirm("Create a new board from this response? The current board stays available in History.")) return;
     state.agentBoardDesigning = true; renderMessages(); renderAgentBoard();
     if (!els.agentBoardDialog.open) await openAgentBoard();
     try {
       if (state.agentBoard.agents.length) await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard });
+      const draftDesign = { title: origin.title || "Selected plan", objective: planText.slice(0, 8000), concurrency: 2, agents: [
+        { key: "implement", name: "Implementation", role: "build", access: "build", task: "Read the complete selected plan in the project brief. Implement its deliverables in the stated order; report changed files and unresolved requirements.", dependsOn: [] },
+        { key: "acceptance", name: "Acceptance criteria", role: "review", access: "read", task: "Read the complete selected plan. Independently produce a concrete acceptance checklist and test cases for every requirement. Do not modify project files.", dependsOn: [] },
+        { key: "supervisor", name: "Project Supervisor", role: "supervisor", access: "read", task: "Compare the implementation against the plan and acceptance checklist. Inspect actual deliverables, request rework when necessary, and report accepted and outstanding requirements.", dependsOn: ["implement", "acceptance"] }
+      ] };
+      state.agentBoard = boardFromArchitecture(draftDesign, planText, messageID, origin.id, "", origin.directory);
+      state.agentBoard = normalizeAgentBoard(await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard }));
+      renderAgentBoard();
       const model = selectedModel() || state.models[0];
       if (!model) throw new Error("Choose a connected model before designing the team.");
       const architect = await api("/session", { directory: origin.directory, method: "POST", body: { title: `[Board Architect] ${origin.title || "Plan"}` } });
       state.sessions.unshift(architect);
+      state.agentBoard.architectSessionID = architect.id;
       const catalog = state.models.slice(0, 40).map((item) => ({ value: item.value, name: item.name, provider: item.providerName }));
       const prompt = `You are Seneschal's Board Architect. Read only the plan below and design the smallest effective multi-agent workflow for it. Independent work should run in parallel. Include exactly one supervisor who owns acceptance and can request rework. Give each agent one concrete role, task, system access, and dependencies. Use 2-8 agents. Access must be observe, read, browser, or build. Roles must be plan, build, review, or supervisor. Keys must be unique and dependsOn may reference only agents listed earlier. Choose model values only from the supplied catalog; otherwise omit model. Return JSON only, with this shape: {"title":"...","objective":"...","concurrency":3,"agents":[{"key":"unique-key","name":"...","role":"plan","access":"read","model":"optional catalog value","task":"...","dependsOn":["earlier-key"]}]}.\n\n# Available models\n${JSON.stringify(catalog)}\n\n# Selected plan\n${planText.slice(0, 50000)}`;
       const tools = Object.fromEntries([...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"])].map((tool) => [tool, false]));
@@ -1412,12 +1455,15 @@
       state.agentBoard = boardFromArchitecture(design, planText, messageID, origin.id, architect.id, origin.directory);
       state.agentBoard = normalizeAgentBoard(await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard }));
       renderAgentBoard(); renderSessions(); toast(`${state.agentBoard.agents.length - 1} agents were designed from the selected plan. Review their cards, then run the board.`);
-    } catch (error) { toast(`The board could not be generated: ${error.message}`, "error"); }
+    } catch (error) {
+      const retained = state.agentBoard.planMessageID === messageID && state.agentBoard.agents.length;
+      toast(retained ? `Your plan and default team are saved. AI customization failed: ${error.message}. Review the team, then Run board.` : `The board could not be generated: ${error.message}`, retained ? "warn" : "error");
+    }
     finally { state.agentBoardDesigning = false; renderMessages(); renderAgentBoard(); }
   }
 
   async function boardAgentResult(agent) {
-    if (agent?.sourceText) return agent.sourceText.slice(-30000);
+    if (agent?.sourceText) return agent.sourceText;
     if (!agent?.sessionID) return "No session output was available.";
     try {
       const messages = await api(`/session/${encodeURIComponent(agent.sessionID)}/message`, { directory: state.agentBoard.directory || state.currentDirectory });
@@ -1480,6 +1526,7 @@
   }
 
   async function runBoardAgent(agentID, manual = false) {
+    if (state.agentBoardDesigning) return false;
     const agent = boardAgent(agentID);
     if (!agent || agent.status === "running") return false;
     const unmet = agent.dependencies.map(boardAgent).filter((item) => !item || item.status !== "complete");
@@ -1497,6 +1544,7 @@
         state.sessions.unshift(session);
       }
       const text = await boardPrompt(agent);
+      if (agent.status !== "running") return false;
       const requestAgent = agent.access === "build" ? "build" : "plan";
       const availableTools = [...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"].filter((tool) => tool && tool !== "invalid"))];
       const allowed = {
@@ -1529,14 +1577,21 @@
   }
 
   async function scheduleReadyBoardAgents() {
-    if (!state.agentBoard.active || state.agentBoard.paused) return;
+    if (!state.agentBoard.active || state.agentBoard.paused || state.boardScheduling || state.agentBoardDesigning) return;
+    state.boardScheduling = true;
+    try {
     const running = state.agentBoard.agents.filter((agent) => agent.status === "running").length;
     const capacity = Math.max(0, state.agentBoard.concurrency - running);
     const ready = state.agentBoard.agents.filter((agent) => agent.status === "ready" && agent.dependencies.every((id) => boardAgent(id)?.status === "complete")).slice(0, capacity);
-    for (const agent of ready) await runBoardAgent(agent.id);
+    for (const agent of ready) {
+      if (state.agentBoard.paused || !state.agentBoard.active) break;
+      if (state.agentBoard.agents.filter((item) => item.status === "running").length >= state.agentBoard.concurrency) break;
+      await runBoardAgent(agent.id);
+    }
     const stillRunning = state.agentBoard.agents.some((agent) => agent.status === "running");
     const runnable = state.agentBoard.agents.some((agent) => agent.status === "ready" && agent.dependencies.every((id) => boardAgent(id)?.status === "complete"));
     if (!stillRunning && !runnable) { state.agentBoard.active = false; state.agentBoard.paused = false; scheduleAgentBoardSave(); renderAgentBoard(); stopAgentBoardMonitor(); }
+    } finally { state.boardScheduling = false; }
   }
 
   async function reconcileAgentBoardStatuses(statuses = state.statuses) {
@@ -1544,11 +1599,13 @@
     for (const agent of state.agentBoard.agents.filter((item) => item.status === "running" && item.sessionID)) {
       const entry = statuses[agent.sessionID];
       const status = typeof entry === "string" ? entry : entry?.type || entry?.status;
-      let completed = status === "idle";
-      if (!status && Date.now() - agent.startedAt > 1200) {
+      let completed = false;
+      if ((status === "idle" || !status) && Date.now() - agent.startedAt > 1200) {
         try {
           const messages = await api(`/session/${encodeURIComponent(agent.sessionID)}/message`, { directory: state.agentBoard.directory || state.currentDirectory });
-          completed = [...messages].reverse().some((message) => message.info?.role === "assistant" && (message.info?.time?.completed || (message.parts || []).some((part) => part.type === "text" && part.text)));
+          const latest = [...messages].reverse().find((message) => message.info?.role === "assistant" && Number(message.info?.time?.created) >= agent.startedAt);
+          if (latest?.info?.error) { agent.status = "failed"; agent.error = latest.info.error.data?.message || latest.info.error.message || "The model returned an error."; agent.completedAt = Date.now(); changed = true; }
+          completed = Boolean(latest?.info?.time?.completed) && !latest?.info?.error;
         } catch {
           if (!state.sessions.some((session) => session.id === agent.sessionID)) { agent.status = "failed"; agent.error = "The linked session no longer exists."; agent.completedAt = Date.now(); changed = true; }
         }
@@ -1581,19 +1638,19 @@
   }
 
   async function stopAgentBoard() {
-    const running = state.agentBoard.agents.filter((agent) => agent.status === "running" && agent.sessionID);
-    await Promise.all(running.map((agent) => api(`/session/${encodeURIComponent(agent.sessionID)}/abort`, { directory: state.agentBoard.directory || state.currentDirectory, method: "POST" }).catch(() => null)));
+    const running = state.agentBoard.agents.filter((agent) => agent.status === "running");
     running.forEach((agent) => { agent.status = "failed"; agent.error = "Stopped by user."; agent.completedAt = Date.now(); });
     state.agentBoard.active = false; state.agentBoard.paused = false;
+    await Promise.all(running.filter((agent) => agent.sessionID).map((agent) => api(`/session/${encodeURIComponent(agent.sessionID)}/abort`, { directory: state.agentBoard.directory || state.currentDirectory, method: "POST" }).catch(() => null)));
     stopAgentBoardMonitor(); scheduleAgentBoardSave(); renderAgentBoard(); renderSessions();
     toast("Running board agents were stopped.");
   }
 
   async function stopBoardAgent(agentID) {
     const agent = boardAgent(agentID);
-    if (!agent || agent.status !== "running" || !agent.sessionID) return;
-    try { await api(`/session/${encodeURIComponent(agent.sessionID)}/abort`, { directory: state.agentBoard.directory || state.currentDirectory, method: "POST" }); } catch {}
+    if (!agent || agent.status !== "running") return;
     agent.status = "failed"; agent.error = "Stopped by user."; agent.activity = "Stopped. Edit the card or run it again when ready."; agent.activityType = "Stopped"; agent.completedAt = Date.now();
+    try { if (agent.sessionID) await api(`/session/${encodeURIComponent(agent.sessionID)}/abort`, { directory: state.agentBoard.directory || state.currentDirectory, method: "POST" }); } catch {}
     scheduleAgentBoardSave(); renderAgentBoard(); renderSessions(); await scheduleReadyBoardAgents();
   }
 
@@ -1661,7 +1718,7 @@
 
   function instructionEndpoint() {
     const url = new URL("/workspace/instructions", location.origin);
-    if (state.currentDirectory) url.searchParams.set("directory", state.currentDirectory);
+    if (workingDirectory()) url.searchParams.set("directory", workingDirectory());
     return `${url.pathname}${url.search}`;
   }
 
@@ -1771,7 +1828,7 @@
     const stack = [
       ["Persona", "global", els.personaEditor.value],
       ["General instructions", "global", els.generalEditor.value],
-      ["Project instructions", state.currentDirectory ? basename(state.currentDirectory) : "inactive", els.projectEditor.value],
+      ["Project instructions", workingDirectory() ? basename(workingDirectory()) : "inactive", els.projectEditor.value],
       [`${selectedRole === "plan" ? "Plan" : "Build"} role`, "per request", selectedRole === "plan" ? els.planAgentEditor.value : els.buildAgentEditor.value]
     ];
     const cards = stack.map(([title, scope, content]) => `<article class="stack-card"><header><strong>${escapeHTML(title)}</strong><span>${escapeHTML(scope)}</span></header><pre>${escapeHTML(content.trim() || "No instructions saved.")}</pre></article>`).join("");
@@ -1795,7 +1852,7 @@
     $("#projectInstructionPath").textContent = shortManagedPath(data.project?.path);
     const projectStatus = $("#projectInstructionStatus");
     projectStatus.classList.toggle("ready", Boolean(data.project?.available));
-    $("span", projectStatus).textContent = data.project?.available ? `Editing rules for ${basename(state.currentDirectory)}.` : "Select a project to edit its instructions.";
+    $("span", projectStatus).textContent = data.project?.available ? `Editing rules for ${workingDirectory()}.` : "Select a project to edit its instructions.";
     $('[data-save-instruction="project"]').disabled = !data.project?.available;
     $('[data-undo-instruction="project"]').disabled = !data.project?.available;
     $('[data-default-instruction="project"]').disabled = !data.project?.available;
@@ -1851,7 +1908,7 @@
     setInstructionState("Saving", "saving");
     instructionFailure();
     try {
-      const result = await workspace("/workspace/instructions/save", { method: "POST", body: { kind, content: editor.value, directory: state.currentDirectory } });
+      const result = await workspace("/workspace/instructions/save", { method: "POST", body: { kind, content: editor.value, directory: workingDirectory() } });
       state.instructionData = result.snapshot;
       populateInstructionEditors();
       toast(`${kind.replace("agent-", "")} instructions saved and backed up.`);
@@ -1862,7 +1919,7 @@
     setInstructionState("Restoring", "saving");
     instructionFailure();
     try {
-      const result = await workspace("/workspace/instructions/undo", { method: "POST", body: { kind, directory: state.currentDirectory } });
+      const result = await workspace("/workspace/instructions/undo", { method: "POST", body: { kind, directory: workingDirectory() } });
       state.instructionData = result.snapshot;
       populateInstructionEditors();
       toast("Previous instruction version restored.");
@@ -1989,7 +2046,7 @@
     $("#sendSessionToBoardButton").disabled = !session;
     if (!session) { els.composerStop.hidden = true; els.send.hidden = false; return; }
     els.sessionTitle.textContent = session.title || "Untitled session";
-    els.projectEyebrow.textContent = basename(session.directory).toUpperCase();
+    els.projectEyebrow.textContent = sessionProject(session) === session.directory ? basename(session.directory).toUpperCase() : `${basename(sessionProject(session))} · tools: ${session.directory}`;
     const status = sessionStatus(session.id);
     els.sessionStatus.className = `status-chip ${status}`;
     $("span", els.sessionStatus).textContent = status;
@@ -2401,7 +2458,7 @@
   }
 
   function renderComposer() {
-    els.composerProject.textContent = state.currentDirectory ? basename(state.currentDirectory) : "No project selected";
+    els.composerProject.textContent = workingDirectory() ? `Working in ${basename(workingDirectory())}` : "No project selected";
     els.send.disabled = !state.currentDirectory || !state.models.length;
   }
 
@@ -2430,7 +2487,7 @@
 
   async function refreshSessions() {
     try {
-      state.sessions = await api("/session", { noDirectory: true });
+      state.sessions = (await api("/session", { noDirectory: true })).map(normalizeSession);
       state.statuses = await api("/session/status", { noDirectory: true }).catch(() => state.statuses);
       renderProjects(); renderSessions(); renderHeader(); renderUsage();
     } catch (error) { toast(`Could not refresh sessions: ${error.message}`, "error"); }
@@ -2438,7 +2495,7 @@
 
   async function refreshDirectoryData() {
     if (!state.currentDirectory) return;
-    const dir = state.currentDirectory;
+    const dir = selectedSession()?.directory || state.currentDirectory;
     const results = await Promise.allSettled([
       api("/config", { directory: dir }), api("/agent", { directory: dir }),
       api("/experimental/tool/ids", { directory: dir }), api("/permission", { directory: dir }),
@@ -2461,7 +2518,7 @@
     state.currentDirectory = directory;
     state.showArchivedSessions = false;
     storage.set("atelier-directory", directory);
-    const sessions = ordinarySessions().filter((session) => session.directory === directory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0));
+    const sessions = ordinarySessions().filter((session) => sessionProject(session) === directory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0));
     state.currentSessionID = sessions[0]?.id || "";
     storage.set("atelier-session", state.currentSessionID);
     state.messages = [];
@@ -2481,8 +2538,8 @@
     state.currentSessionID = id;
     storage.set("atelier-session", id);
     const session = selectedSession();
-    if (session?.directory !== state.currentDirectory) {
-      state.currentDirectory = session.directory;
+    if (session && sessionProject(session) !== state.currentDirectory) {
+      state.currentDirectory = sessionProject(session);
       storage.set("atelier-directory", state.currentDirectory);
       connectEvents();
     }
@@ -2557,6 +2614,15 @@
     if (!session) return;
     const model = selectedModel();
     if (!model) { toast("Connect a model in OpenCode settings first.", "warn"); return; }
+    if (model.providerID === "bonsai" && model.id === "ternary-bonsai-27b") {
+      try {
+        toast("Starting local Bonsai 27B in Bionic…");
+        await workspace("/workspace/local-model/prepare", { method: "POST", body: {} });
+      } catch (error) {
+        toast(`Bonsai 27B could not start: ${error.message}`, "error");
+        return false;
+      }
+    }
     const parts = [...state.attachments.map((attachment) => {
       const { name, type, data } = normalizedAttachment(attachment);
       return { type: "file", mime: type, filename: name, url: data };
@@ -2571,7 +2637,7 @@
     renderAttachments(); renderHeader(); renderMessages(true);
     autoSizePrompt();
     updateConversationClearance();
-    if (window.ResizeObserver) new ResizeObserver(updateConversationClearance).observe(els.form);
+    if (window.ResizeObserver && !state.composerObserver) { state.composerObserver = new ResizeObserver(updateConversationClearance); state.composerObserver.observe(els.form); }
     try {
       const chatOnly = state.selectedAgent === "chat";
       const availableTools = [...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"].filter((tool) => tool && tool !== "invalid"))];
@@ -2679,7 +2745,7 @@
       state.pendingDeleteSessionID = "";
       if (wasCurrent) {
         const next = ordinarySessions()
-          .filter((item) => item.directory === session.directory && !item.parentID && !state.archivedSessions.has(item.id))
+          .filter((item) => sessionProject(item) === sessionProject(session) && !item.parentID && !state.archivedSessions.has(item.id))
           .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0];
         state.currentSessionID = next?.id || "";
         state.messages = [];
@@ -2715,16 +2781,74 @@
     toast("Conversation exported to Downloads.");
   }
 
-  async function renameSession(sessionID = state.currentSessionID) {
+  function renameSession(sessionID = state.currentSessionID) {
     const session = state.sessions.find((item) => item.id === sessionID);
     if (!session) return;
-    const title = window.prompt("Rename this session", session.title || "");
-    if (!title?.trim()) return;
+    const dialog = $("#renameSessionDialog");
+    dialog.dataset.session = session.id;
+    $("#sessionTitleInput").value = session.title || "";
+    $("#renameSessionError").hidden = true;
+    dialog.showModal();
+    $("#sessionTitleInput").focus();
+    $("#sessionTitleInput").select();
+  }
+
+  async function saveSessionTitle(event) {
+    event.preventDefault();
+    const dialog = $("#renameSessionDialog");
+    const session = state.sessions.find((item) => item.id === dialog.dataset.session);
+    const title = $("#sessionTitleInput").value.trim();
+    if (!session || !title) return;
+    const button = $("#saveSessionTitleButton");
+    button.disabled = true;
     try {
-      const updated = await api(`/session/${encodeURIComponent(session.id)}`, { directory: session.directory, method: "PATCH", body: { title: title.trim() } });
-      Object.assign(session, updated);
+      const updated = await api(`/session/${encodeURIComponent(session.id)}`, { directory: session.directory, method: "PATCH", body: { title } });
+      Object.assign(session, normalizeSession(updated));
+      dialog.close();
       renderSessions(); renderHeader();
-    } catch (error) { toast(`Could not rename the session: ${error.message}`, "error"); }
+      toast("Session renamed.");
+    } catch (error) { $("#renameSessionError").textContent = error.message; $("#renameSessionError").hidden = false; }
+    finally { button.disabled = false; }
+  }
+
+  function openMoveSession() {
+    const session = selectedSession();
+    if (!session) return;
+    if (["busy", "retry"].includes(sessionStatus(session.id))) { toast("Wait for this session to finish before moving it.", "warn"); return; }
+    if (state.agentBoard.agents.some((agent) => agent.sessionID === session.id)) { toast("Board agents use their board's project. Move an ordinary session instead.", "warn"); return; }
+    const targets = directories().filter((directory) => directory !== sessionProject(session));
+    $("#moveSessionWorkingFolder").textContent = session.directory;
+    $("#moveSessionProject").innerHTML = targets.map((directory) => `<option value="${escapeHTML(directory)}">${escapeHTML(basename(directory))} — ${escapeHTML(directory)}</option>`).join("");
+    $("#moveSessionError").hidden = targets.length > 0;
+    $("#moveSessionError").textContent = "Add another project in the sidebar first.";
+    $("#confirmMoveSessionButton").disabled = !targets.length;
+    $("#moveSessionDialog").dataset.session = session.id;
+    $("#moveSessionDialog").showModal();
+  }
+
+  async function moveSession(event) {
+    event.preventDefault();
+    const dialog = $("#moveSessionDialog");
+    const session = state.sessions.find((item) => item.id === dialog.dataset.session);
+    const directory = $("#moveSessionProject").value;
+    if (!session || !directory) return;
+    const button = $("#confirmMoveSessionButton"); button.disabled = true;
+    try {
+      if (["busy", "retry"].includes(sessionStatus(session.id))) throw new Error("The session is running. Wait for it to finish.");
+      await api("/path", { directory });
+      const assignments = await workspace("/workspace/session-projects", { method: "POST", body: { sessionID: session.id, directory } });
+      if (assignments[session.id] !== directory) throw new Error("The destination project was not saved. Please retry after updating Seneschal.");
+      state.sessionProjects = assignments;
+      state.sessions = state.sessions.map(normalizeSession);
+      state.railSections.projects = false; state.railSections.sessions = false;
+      storage.set("seneschal-rail-sections-v2", state.railSections);
+      state.currentDirectory = directory; state.currentSessionID = session.id;
+      storage.set("atelier-directory", directory); storage.set("atelier-session", session.id);
+      dialog.close(); renderAll(); connectEvents();
+      await refreshDirectoryData(); await refreshInstructionData(false); await refreshMessages();
+      toast(`Session moved to ${basename(directory)}.`);
+    } catch (error) { $("#moveSessionError").textContent = error.message; $("#moveSessionError").hidden = false; }
+    finally { button.disabled = false; }
   }
 
   function scheduleMessageRefresh(scroll = true) {
@@ -2754,7 +2878,7 @@
   function connectEvents() {
     state.eventSource?.close();
     if (!state.currentDirectory) return;
-    const source = new EventSource(withDirectory("/api/event", state.currentDirectory));
+    const source = new EventSource(withDirectory("/api/event", selectedSession()?.directory || state.currentDirectory));
     state.eventSource = source;
     source.onopen = () => { setConnection("online", "Live"); els.pulseLabel.textContent = "LIVE"; log("stream.open", basename(state.currentDirectory)); };
     source.onerror = () => { setConnection("", "Reconnecting"); els.pulseLabel.textContent = "RETRY"; };
@@ -2775,11 +2899,11 @@
           refreshMessages(true).then(speakLatestAssistant).catch(() => scheduleConversationListening(500));
         }
       } else if (payload.type === "session.created") {
-        if (!state.sessions.some((session) => session.id === properties.info?.id)) state.sessions.push(properties.info);
+        if (!state.sessions.some((session) => session.id === properties.info?.id)) state.sessions.push(normalizeSession(properties.info));
         renderProjects(); renderSessions();
       } else if (payload.type === "session.updated") {
         const index = state.sessions.findIndex((session) => session.id === properties.info?.id);
-        if (index >= 0) state.sessions[index] = properties.info; else state.sessions.push(properties.info);
+        if (index >= 0) state.sessions[index] = normalizeSession(properties.info); else state.sessions.push(normalizeSession(properties.info));
         renderSessions(); renderHeader(); renderUsage();
       } else if (payload.type === "session.deleted") {
         state.sessions = state.sessions.filter((session) => session.id !== properties.info?.id);
@@ -3367,10 +3491,12 @@
   async function refreshAll(showToast = false) {
     setConnection("", "Refreshing");
     try {
-      const [health, path, sessions, providers] = await Promise.all([
+      const [health, path, sessions, providers, assignments] = await Promise.all([
         api("/global/health", { noDirectory: true }), api("/path", { noDirectory: true }),
-        api("/session", { noDirectory: true }), api("/provider", { noDirectory: true })
+        api("/session", { noDirectory: true }), api("/provider", { noDirectory: true }), workspace("/workspace/session-projects")
       ]);
+      state.sessionProjects = assignments;
+      sessions.forEach((session, index) => { sessions[index] = normalizeSession(session); });
       state.health = health; state.path = path; state.sessions = sessions; state.providers = providers;
       els.version.textContent = health.version || "—";
       let availableDirectories = directories();
@@ -3380,8 +3506,8 @@
       if (requestedDirectory) state.currentDirectory = requestedDirectory;
       if (!state.currentDirectory || !availableDirectories.includes(state.currentDirectory)) state.currentDirectory = availableDirectories[0] || "";
       if (requestedSessionID && sessions.some((session) => session.id === requestedSessionID)) state.currentSessionID = requestedSessionID;
-      const currentExists = sessions.some((session) => session.id === state.currentSessionID && session.directory === state.currentDirectory);
-      if (!currentExists) state.currentSessionID = ordinarySessions().filter((session) => session.directory === state.currentDirectory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0]?.id || "";
+      const currentExists = sessions.some((session) => session.id === state.currentSessionID && sessionProject(session) === state.currentDirectory);
+      if (!currentExists) state.currentSessionID = ordinarySessions().filter((session) => sessionProject(session) === state.currentDirectory && !session.parentID).sort((a,b) => (b.time?.updated || 0) - (a.time?.updated || 0))[0]?.id || "";
       if (state.launchSelection?.directory || state.launchSelection?.sessionID) {
         state.launchSelection = null;
         storage.set("atelier-projects", state.customDirectories);
@@ -3542,7 +3668,12 @@
     els.deleteProjectForm.addEventListener("submit", (event) => { if (event.submitter?.id === "confirmDeleteProjectButton") { event.preventDefault(); deleteProject(); } });
     els.messageEditForm.addEventListener("submit", submitMessageEdit);
     $("#cancelMessageEditButton").addEventListener("click", () => els.messageEditDialog.close());
-    $("#renameSessionButton").addEventListener("click", renameSession);
+    $("#renameSessionButton").addEventListener("click", () => renameSession());
+    $("#renameSessionForm").addEventListener("submit", saveSessionTitle);
+    $("#cancelSessionRename").addEventListener("click", () => $("#renameSessionDialog").close());
+    $("#moveSessionButton").addEventListener("click", openMoveSession);
+    $("#moveSessionForm").addEventListener("submit", moveSession);
+    $("#cancelSessionMove").addEventListener("click", () => $("#moveSessionDialog").close());
     els.projectForm.addEventListener("submit", addProject);
     $("#openInspectorButton").addEventListener("click", () => els.inspector.classList.add("open"));
     $("#closeInspectorButton").addEventListener("click", () => els.inspector.classList.remove("open"));

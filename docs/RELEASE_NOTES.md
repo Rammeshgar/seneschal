@@ -1,4 +1,24 @@
-# Seneschal v0.2.1 beta 15
+# Seneschal v0.2.1 beta 16
+
+Beta 16 focuses on reliability at the boundaries between sessions, projects, models, and multi-agent work.
+
+Session renaming now opens consistently. **Move session** is an organizational operation: it places the conversation under another Seneschal project while preserving history, pins, archives, and the selected model. The engine's original tool working folder remains unchanged and is shown clearly. Assignments are stored in Seneschal's local data rather than fragile engine metadata, and existing named projects, WSL paths, and Windows paths are accepted.
+
+Sending one selected plan response to Agent Board now saves that exact text and immediately creates a practical default implementation, checking, and supervisor team. The chosen plan can be expanded and reviewed inside the board. If Board Architect customization fails, the saved default board remains usable instead of disappearing.
+
+Board scheduling now distinguishes a finished response from old or partial output, respects the configured parallel-worker limit when scheduling calls overlap, and stops workers even during session creation. Independent workers can still run concurrently, and the Supervisor receives every required handoff before final acceptance.
+
+The interface uses larger conversation text, stronger secondary contrast, more distinct colors across navigation and board states, and responsive composer controls that wrap when browser zoom reduces the available width. On narrow windows the inspector becomes a drawer rather than squeezing the conversation.
+
+The model catalog includes GPT-6 Astra when the connected OpenAI provider exposes it. A locally downloaded quantized Ternary Bonsai 27B model can run through Seneschal's PrismML-compatible local runtime; local model availability still depends on the configured weights and runtime starting successfully.
+
+Windows launcher reporting is more accurate: PowerShell 5.1 no longer treats ordinary native stderr warnings as automatic launch failure, and a server that starts and later exits is reported as having stopped unexpectedly. An already-running older Seneschal server must be restarted before updated backend behavior takes effect.
+
+The release includes behavior tests for durable project assignments, exact selected-plan handoffs, current-run completion detection, and parallel scheduling, alongside the existing security, installer, browser, VS Code, and UI checks.
+
+---
+
+## Previous beta 15 highlights
 
 Agent Board work is now clearly separated from ordinary conversations. Board Architect and worker sessions no longer clutter the Sessions, pinned Sessions, archive manager, project counts, or command search. They remain retained inside their board cards, where their work can still be reopened and inspected.
 

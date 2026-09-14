@@ -26,6 +26,14 @@ It is not an AI model, a provider subscription, or a way around provider usage l
 
 The image above is a privacy-safe product illustration based on the real interface. It shows the three-part workspace, approval controls, activity reporting, and local bridge status without exposing a user's sessions or provider account.
 
+### Session organization and readability
+
+Use the pencil in the session header to rename a conversation, or the folder-arrow button to organize it under another project. Project assignments are saved in Seneschal's `data/session-projects.json`, independently of engine refreshes, and survive a reload. Moves retain the conversation, model, pins, and archive state and expand the destination list. A running session must finish first. This changes where the session appears in Seneschal; the engine retains its original working folder, which is shown in the move dialog and session header. Start a new session in the destination project to work in that folder. Classic OpenCode and other clients may still show the original project.
+
+Sending a selected plan message to Agent Board saves the exact plan and a default implementation/checking/supervisor team before AI customization begins. If customization fails, that default board remains available for review and execution. Expand **Read the selected plan** to inspect the brief. Worker completion requires a completed reply from the current run, not an older reply or partial text. Independent workers can run up to the configured parallel limit.
+
+Conversation text is 16 px, code is 13 px, and headings use Palatino with Segoe UI for controls. Both themes provide stronger secondary-text contrast. On narrower windows the inspector opens as a drawer to preserve room for the conversation.
+
 ### Agent Board
 
 ![Privacy-safe screenshot of the Seneschal Agent Board](docs/images/seneschal-agent-board-night.png)
