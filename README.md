@@ -22,7 +22,7 @@ It is not an AI model, a provider subscription, or a way around provider usage l
 
 ## Interface
 
-![Privacy-safe illustration of the Seneschal night workspace](docs/images/seneschal-workspace-night.png)
+![Privacy-safe illustration of the Seneschal night workspace](https://github.com/user-attachments/assets/5bc84b8c-f4dc-460b-b726-d7046a4d6cf4)
 
 The image above is a privacy-safe product illustration based on the real interface. It shows the three-part workspace, approval controls, activity reporting, and local bridge status without exposing a user's sessions or provider account.
 
