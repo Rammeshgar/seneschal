@@ -1,6 +1,20 @@
-# Seneschal v0.2.1 beta 16
+# Seneschal v0.2.1 beta 17
 
-Beta 16 focuses on reliability at the boundaries between sessions, projects, models, and multi-agent work.
+Beta 17 focuses on approvals, project organization, and transparent account usage.
+
+Approval requests now stay visible while their session is working and through delayed engine snapshots, rather than appearing briefly and disappearing. Permission polling and replies use the requesting session's actual working directory, so reorganizing a conversation under another project does not make its approval controls stop working.
+
+Projects can now have a custom display name inside Seneschal. Renaming changes only the label: the real folder, files, sessions, and tool working paths remain untouched. Project aliases persist locally and appear consistently in navigation, headers, and the Move session dialog.
+
+The sidebar and Workspace settings now include a direct shortcut to OpenAI's official Work and Codex usage dashboard, where ChatGPT Plus users can check their current five-hour and weekly allowance and reset times. Seneschal does not invent a token estimate or claim access to an unavailable input/output split.
+
+Session-status handling now accepts the engine's supported payload shapes, and the release includes regression coverage for sticky approvals, safe project labels, and the official usage controls. The complete test suite passes.
+
+---
+
+## Previous beta 16 highlights
+
+Beta 16 focused on reliability at the boundaries between sessions, projects, models, and multi-agent work.
 
 Session renaming now opens consistently. **Move session** is an organizational operation: it places the conversation under another Seneschal project while preserving history, pins, archives, and the selected model. The engine's original tool working folder remains unchanged and is shown clearly. Assignments are stored in Seneschal's local data rather than fragile engine metadata, and existing named projects, WSL paths, and Windows paths are accepted.
 

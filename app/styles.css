@@ -160,9 +160,13 @@ html[data-theme="night"] .theme-track b { transform: translateX(22px); backgroun
 .project-glyph { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--forest); font: 750 8px/1 ui-monospace, monospace; }
 .project-item span:nth-child(2) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-weight: 620; }
 .project-item small { font: 650 8px/1 ui-monospace, monospace; color: var(--faint); }
-.project-delete-button { width: 24px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--danger); opacity: .38; cursor: pointer; }
-.project-delete-button svg { width: 11px; height: 11px; }
-.project-row:hover .project-delete-button, .project-delete-button:focus-visible { opacity: 1; border-color: color-mix(in srgb, var(--danger) 36%, var(--line)); background: var(--recessed); }
+.project-rename-button, .project-delete-button { width: 24px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; opacity: .38; cursor: pointer; }
+.project-rename-button { color: var(--cobalt); }
+.project-delete-button { color: var(--danger); }
+.project-rename-button svg, .project-delete-button svg { width: 11px; height: 11px; }
+.project-row:hover :is(.project-rename-button, .project-delete-button), :is(.project-rename-button, .project-delete-button):focus-visible { opacity: 1; background: var(--recessed); }
+.project-rename-button:hover, .project-rename-button:focus-visible { border-color: color-mix(in srgb, var(--cobalt) 42%, var(--line)); }
+.project-delete-button:hover, .project-delete-button:focus-visible { border-color: color-mix(in srgb, var(--danger) 36%, var(--line)); }
 .session-item { min-height: 46px; padding: 3px 4px 3px 8px; align-items: center; }
 .session-item::before { content: ""; position: absolute; left: 2px; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--line-strong); }
 .session-item.active { background: var(--recessed); color: var(--ink); border-color: var(--line); }
@@ -586,6 +590,14 @@ dialog::backdrop { background: rgba(7,9,8,.58); backdrop-filter: blur(5px); }
 .interactive-setting:focus-visible { outline: 2px solid color-mix(in srgb, var(--ochre) 72%, transparent); outline-offset: 2px; }
 .provider-setting { border-color: color-mix(in srgb, var(--cobalt) 45%, var(--line)); }
 .chatgpt-setting { border-color: color-mix(in srgb, var(--cobalt) 36%, var(--line)); }.chatgpt-setting:hover { border-color: var(--cobalt); background: color-mix(in srgb, var(--cobalt) 7%, var(--recessed)); }.chatgpt-setting span { color: var(--cobalt); }
+.chatgpt-usage-setting { border-color: color-mix(in srgb, var(--forest) 42%, var(--line)); }
+.chatgpt-usage-setting span { color: var(--forest); }
+.account-usage-card { width: 100%; display: grid; gap: 5px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--forest) 38%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--forest) 7%, var(--recessed)); color: var(--ink); text-align: left; cursor: pointer; }
+.account-usage-card span { color: var(--forest); font: 700 7px/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.account-usage-card strong { font-size: 10px; }
+.account-usage-card small { color: var(--muted); font-size: 8px; }
+.account-usage-card:hover { border-color: var(--forest); transform: translateY(-1px); }
+.path-note { display: block; margin-top: 8px; overflow-wrap: anywhere; color: var(--faint); font: 600 8px/1.5 ui-monospace, monospace; }
 .motion-setting { grid-column: 1 / -1; border-color: color-mix(in srgb, var(--cobalt) 24%, var(--line)); }
 .settings-note { padding: 11px; border-left: 2px solid var(--ochre); background: color-mix(in srgb, var(--ochre) 5%, transparent); }
 

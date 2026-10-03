@@ -93,6 +93,9 @@
             <div class="meter"><i id="usageMeter"></i></div>
             <small id="usageDetail">Ready for a new session</small>
           </div>
+          <button class="account-usage-card" id="openChatGPTUsageButton" type="button" title="Open the official Work and Codex usage dashboard">
+            <span>Plus agent usage</span><strong>View remaining allowance</strong><small>Official 5-hour and weekly limits</small>
+          </button>
           <button class="rail-link" id="settingsRailButton"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.08V21h-4v-.92a1.7 1.7 0 0 0-1.08-.68 1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.08-.04H3v-4h.92A1.7 1.7 0 0 0 4.6 8.88 1.7 1.7 0 0 0 4.26 7l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.08V3h4v.92A1.7 1.7 0 0 0 15.12 4.6 1.7 1.7 0 0 0 17 4.26l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.4.3.76.6 1l.08.04H21v4h-.92a1.7 1.7 0 0 0-.68 1.08Z"/></svg>Settings</button>
           <button class="rail-link" id="classicButton"><svg viewBox="0 0 24 24"><path d="M14 5h5v5M10 14 19 5M19 14v5H5V5h5"/></svg>Classic OpenCode</button>
         </div>
@@ -272,6 +275,17 @@
         <div class="modal-actions"><button value="cancel" class="secondary-button">Cancel</button><button id="confirmProjectButton" value="default" class="primary-button">Add project</button></div>
       </form>
     </dialog>
+    <dialog class="modal" id="renameProjectDialog" aria-labelledby="renameProjectHeading">
+      <form id="renameProjectForm">
+        <div class="modal-kicker">PROJECT LABEL</div>
+        <h2 id="renameProjectHeading">Rename project</h2>
+        <p>This changes only the name shown in Seneschal. The folder, files, sessions, and tool paths remain unchanged.</p>
+        <label>Display name<input id="projectNameInput" required maxlength="80" autocomplete="off" /></label>
+        <small class="path-note" id="renameProjectPath"></small>
+        <div class="modal-error" id="renameProjectError" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" id="cancelProjectRename" class="secondary-button">Cancel</button><button type="submit" class="primary-button">Save name</button></div>
+      </form>
+    </dialog>
 
     <dialog class="modal settings-modal" id="settingsDialog">
       <form method="dialog">
@@ -280,6 +294,7 @@
         <div class="settings-grid">
           <button class="setting-card interactive-setting" type="button" id="openInstructionsButton"><span>Instructions Studio</span><strong id="settingsInstructions">Ready</strong><small>Persona, rules, agent roles, and skills</small></button>
           <button class="setting-card interactive-setting chatgpt-setting" type="button" id="settingsChatGPTButton"><span>ChatGPT companion</span><strong>Normal Chat</strong><small>Separate ChatGPT allowance · opens securely</small></button>
+          <button class="setting-card interactive-setting chatgpt-usage-setting" type="button" id="settingsChatGPTUsageButton"><span>Plus agent usage</span><strong>Official usage dashboard</strong><small>Check remaining 5-hour and weekly Work/Codex allowance</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsEngineButton"><span>Engine</span><strong id="settingsEngine">OpenCode</strong><small>Open the complete OpenCode controls</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsThemeButton"><span>Theme</span><strong id="settingsTheme">Night Studio</strong><small>Switch between the day and night palettes</small></button>
           <button class="setting-card interactive-setting motion-setting" type="button" id="settingsMotionButton"><span>Workspace atmosphere</span><strong id="settingsMotion">Orbit Drift</strong><small>Cycle motion environments or choose still mode</small></button>

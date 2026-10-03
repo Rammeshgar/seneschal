@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1-beta.17 — 2026-10-03
+
+- Keep approval requests visible while a session is working and through delayed permission snapshots, instead of briefly flashing and disappearing.
+- Route approval polling and replies through the session's actual working directory so moved or reorganized sessions remain actionable.
+- Add safe project display-name editing without renaming folders, moving files, or changing tool working paths.
+- Add direct links to OpenAI's official Work and Codex usage dashboard from the sidebar and Workspace settings.
+- Normalize session status payloads across engine response shapes and extend smoke coverage for approvals, project labels, and usage controls.
+
 ## 0.2.1-beta.16 — 2026-09-15
 
 - Make session renaming open reliably and add persistent project organization without changing a session's original tool working folder.

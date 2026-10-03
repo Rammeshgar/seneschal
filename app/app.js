@@ -29,6 +29,7 @@
     pinnedSessions: new Set(storage.get("seneschal-pinned-sessions", [])),
     archivedSessions: new Set(storage.get("seneschal-archived-sessions", [])),
     excludedProjects: new Set(storage.get("seneschal-excluded-projects", [])),
+    projectAliases: storage.get("seneschal-project-aliases", {}),
     showArchivedSessions: false,
     showArchivedMessages: false,
     railSections: storage.get("seneschal-rail-sections-v2", { projects: true, pinnedSessions: true, sessions: true, pins: true }),
@@ -42,6 +43,7 @@
     pendingDeleteSessionID: "",
     pendingDeleteMessageID: "",
     pendingDeleteProject: "",
+    pendingRenameProject: "",
     selectedModel: storage.get("atelier-model", ""),
     sessionModels: storage.get("seneschal-session-models", {}),
     selectedAgent: storage.get("atelier-agent", "build"),
@@ -89,6 +91,7 @@
     agentBoardTimer: null,
     agentBoardSaving: null,
     paidUsage: { budget: 10, cost: null, percent: null },
+    permissionMisses: {},
     permissionTimer: null
   };
 
@@ -729,6 +732,8 @@
     return [...new Set(list)].filter((directory) => !state.excludedProjects.has(directory));
   }
 
+  function projectLabel(directory) { return state.projectAliases[directory] || basename(directory); }
+
   function syncRailSections() {
     const sections = [
       ["projects", els.projectsRail, $("#projectsCollapseButton"), "projects"],
@@ -770,12 +775,37 @@
     els.projectList.innerHTML = dirs.length ? dirs.map((dir) => {
       const count = ordinarySessions().filter((session) => sessionProject(session) === dir && !session.parentID).length;
       const active = dir === state.currentDirectory ? " active" : "";
-      const title = basename(dir);
-      return `<div class="project-row${active}"><button class="project-item${active}" data-directory="${escapeHTML(dir)}" title="Open ${escapeHTML(dir)}"><span class="project-glyph">${escapeHTML(title.slice(0,1).toUpperCase())}</span><span>${escapeHTML(title)}</span><small>${count}</small></button><button class="project-delete-button" type="button" data-delete-project="${escapeHTML(dir)}" aria-label="Delete ${escapeHTML(title)} from Seneschal" title="Remove project from Seneschal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></div>`;
+      const title = projectLabel(dir);
+      return `<div class="project-row${active}"><button class="project-item${active}" data-directory="${escapeHTML(dir)}" title="Open ${escapeHTML(title)} · ${escapeHTML(dir)}"><span class="project-glyph">${escapeHTML(title.slice(0,1).toUpperCase())}</span><span>${escapeHTML(title)}</span><small>${count}</small></button><button class="project-rename-button" type="button" data-rename-project="${escapeHTML(dir)}" aria-label="Rename ${escapeHTML(title)} in Seneschal" title="Rename project label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4 4-.7L18.6 8 16 5.4 4 16Z"/><path d="m14.5 7 2.6 2.6"/></svg></button><button class="project-delete-button" type="button" data-delete-project="${escapeHTML(dir)}" aria-label="Delete ${escapeHTML(title)} from Seneschal" title="Remove project from Seneschal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></div>`;
     }).join("") : '<div class="empty-rail">Add a project folder to begin.</div>';
     $$(".project-item", els.projectList).forEach((button) => button.addEventListener("click", () => switchDirectory(button.dataset.directory)));
+    $$('[data-rename-project]', els.projectList).forEach((button) => button.addEventListener("click", () => openRenameProject(button.dataset.renameProject)));
     $$('[data-delete-project]', els.projectList).forEach((button) => button.addEventListener("click", () => openDeleteProject(button.dataset.deleteProject)));
     syncRailSections();
+  }
+
+  function openRenameProject(directory) {
+    if (!directory) return;
+    state.pendingRenameProject = directory;
+    $("#projectNameInput").value = projectLabel(directory);
+    $("#renameProjectPath").textContent = directory;
+    $("#renameProjectError").hidden = true;
+    $("#renameProjectDialog").showModal();
+    setTimeout(() => { $("#projectNameInput").focus(); $("#projectNameInput").select(); }, 30);
+  }
+
+  function saveProjectName(event) {
+    event.preventDefault();
+    const directory = state.pendingRenameProject;
+    const name = $("#projectNameInput").value.trim();
+    if (!directory || !name) { $("#renameProjectError").textContent = "Enter a project name."; $("#renameProjectError").hidden = false; return; }
+    if (name.length > 80 || /[\x00-\x1f\x7f]/.test(name)) { $("#renameProjectError").textContent = "Use 80 characters or fewer without control characters."; $("#renameProjectError").hidden = false; return; }
+    state.projectAliases[directory] = name;
+    storage.set("seneschal-project-aliases", state.projectAliases);
+    state.pendingRenameProject = "";
+    $("#renameProjectDialog").close();
+    renderProjects(); renderHeader(); renderComposer();
+    toast(`Project label changed to ${name}. The folder was not renamed.`);
   }
 
   function openDeleteProject(directory) {
@@ -790,8 +820,10 @@
     if (!directory) return;
     state.excludedProjects.add(directory);
     state.customDirectories = state.customDirectories.filter((item) => item !== directory);
+    delete state.projectAliases[directory];
     storage.set("seneschal-excluded-projects", [...state.excludedProjects]);
     storage.set("atelier-projects", state.customDirectories);
+    storage.set("seneschal-project-aliases", state.projectAliases);
     state.pendingDeleteProject = "";
     els.deleteProjectDialog.close();
     if (state.currentDirectory === directory) {
@@ -807,7 +839,27 @@
     toast(`${basename(directory)} removed from Seneschal. Its folder and sessions were not deleted.`);
   }
 
-  function sessionStatus(sessionID) { return state.statuses[sessionID]?.type || "idle"; }
+  function sessionStatus(sessionID) {
+    const status = state.statuses[sessionID];
+    return (typeof status === "string" ? status : status?.type || status?.status) || "idle";
+  }
+
+  function mergePermissionSnapshot(latest = [], session = selectedSession()) {
+    const latestByID = new Map(latest.map((permission) => [permission.id, permission]));
+    const merged = [...latest];
+    for (const permission of state.permissions) {
+      if (latestByID.has(permission.id)) { state.permissionMisses[permission.id] = 0; continue; }
+      const belongsHere = !session || !permission.sessionID || permission.sessionID === session.id;
+      if (!belongsHere) { merged.push(permission); continue; }
+      const stillWorking = ["busy", "retry", "running"].includes(sessionStatus(permission.sessionID));
+      state.permissionMisses[permission.id] = (state.permissionMisses[permission.id] || 0) + 1;
+      // The REST snapshot can lag behind the live permission event. Never flash the
+      // approval away: retain it while work is active and through ten verified idle polls.
+      if (stillWorking || state.permissionMisses[permission.id] < 10) merged.push(permission);
+      else delete state.permissionMisses[permission.id];
+    }
+    return merged;
+  }
 
   function toggleSessionPin(sessionID) {
     if (state.archivedSessions.has(sessionID)) { toast("Restore this session before pinning it.", "warn"); return; }
@@ -2046,7 +2098,7 @@
     $("#sendSessionToBoardButton").disabled = !session;
     if (!session) { els.composerStop.hidden = true; els.send.hidden = false; return; }
     els.sessionTitle.textContent = session.title || "Untitled session";
-    els.projectEyebrow.textContent = sessionProject(session) === session.directory ? basename(session.directory).toUpperCase() : `${basename(sessionProject(session))} · tools: ${session.directory}`;
+    els.projectEyebrow.textContent = sessionProject(session) === session.directory ? projectLabel(session.directory).toUpperCase() : `${projectLabel(sessionProject(session))} · tools: ${session.directory}`;
     const status = sessionStatus(session.id);
     els.sessionStatus.className = `status-chip ${status}`;
     $("span", els.sessionStatus).textContent = status;
@@ -2504,7 +2556,7 @@
     if (results[0].status === "fulfilled") state.config = results[0].value;
     if (results[1].status === "fulfilled") state.agents = results[1].value;
     if (results[2].status === "fulfilled") state.tools = results[2].value;
-    if (results[3].status === "fulfilled") state.permissions = results[3].value;
+    if (results[3].status === "fulfilled") state.permissions = mergePermissionSnapshot(results[3].value, selectedSession());
     if (results[4].status === "fulfilled") state.statuses = results[4].value;
     if (results[5].status === "fulfilled") state.mcp = results[5].value;
     if (results[6].status === "fulfilled") state.openCodeCommands = results[6].value || [];
@@ -2818,7 +2870,7 @@
     if (state.agentBoard.agents.some((agent) => agent.sessionID === session.id)) { toast("Board agents use their board's project. Move an ordinary session instead.", "warn"); return; }
     const targets = directories().filter((directory) => directory !== sessionProject(session));
     $("#moveSessionWorkingFolder").textContent = session.directory;
-    $("#moveSessionProject").innerHTML = targets.map((directory) => `<option value="${escapeHTML(directory)}">${escapeHTML(basename(directory))} — ${escapeHTML(directory)}</option>`).join("");
+    $("#moveSessionProject").innerHTML = targets.map((directory) => `<option value="${escapeHTML(directory)}">${escapeHTML(projectLabel(directory))} — ${escapeHTML(directory)}</option>`).join("");
     $("#moveSessionError").hidden = targets.length > 0;
     $("#moveSessionError").textContent = "Add another project in the sidebar first.";
     $("#confirmMoveSessionButton").disabled = !targets.length;
@@ -2914,12 +2966,14 @@
         if (!sessionID || sessionID === state.currentSessionID) scheduleMessageRefresh(true);
       } else if (payload.type === "permission.asked" || payload.type === "permission.updated") {
         const permission = properties;
+        state.permissionMisses[permission.id] = 0;
         const index = state.permissions.findIndex((item) => item.id === permission.id);
         if (index >= 0) state.permissions[index] = permission; else state.permissions.push(permission);
         renderPermissions();
         toast("Approval required — review the request above the message box.", "warn");
       } else if (payload.type === "permission.replied") {
         const requestID = properties.requestID || properties.permissionID || properties.id;
+        delete state.permissionMisses[requestID];
         state.permissions = state.permissions.filter((item) => item.id !== requestID);
         renderPermissions();
       } else if (payload.type === "session.error") {
@@ -2940,20 +2994,25 @@
   async function pollPermissions() {
     if (!state.currentDirectory) return;
     try {
-      const latest = await api("/permission");
-      const changed = JSON.stringify(latest) !== JSON.stringify(state.permissions);
-      state.permissions = latest;
+      const session = selectedSession();
+      const directory = session?.directory || state.currentDirectory;
+      const latest = await api("/permission", { directory });
+      const merged = mergePermissionSnapshot(latest, session);
+      const changed = JSON.stringify(merged) !== JSON.stringify(state.permissions);
+      state.permissions = merged;
       if (changed) renderPermissions();
     } catch { /* Event stream remains the primary path. */ }
   }
 
   async function replyPermission(permission, reply) {
     try {
+      const permissionDirectory = state.sessions.find((session) => session.id === permission.sessionID)?.directory || state.currentDirectory;
       try {
-        await api(`/permission/${encodeURIComponent(permission.id)}/reply`, { directory: state.currentDirectory, method: "POST", body: { reply } });
+        await api(`/permission/${encodeURIComponent(permission.id)}/reply`, { directory: permissionDirectory, method: "POST", body: { reply } });
       } catch {
-        await api(`/session/${encodeURIComponent(permission.sessionID)}/permissions/${encodeURIComponent(permission.id)}`, { directory: state.currentDirectory, method: "POST", body: { response: reply } });
+        await api(`/session/${encodeURIComponent(permission.sessionID)}/permissions/${encodeURIComponent(permission.id)}`, { directory: permissionDirectory, method: "POST", body: { response: reply } });
       }
+      delete state.permissionMisses[permission.id];
       state.permissions = state.permissions.filter((item) => item.id !== permission.id);
       renderPermissions();
       log("permission.reply", reply);
@@ -3290,6 +3349,12 @@
     els.chatGPTDialog.close();
     if (!opened) toast("Your browser blocked the new ChatGPT tab. Allow pop-ups for this local app and try again.", "warn");
     else toast("ChatGPT Chat opened separately with its own allowance.");
+  }
+
+  function openChatGPTUsage() {
+    const opened = window.open("https://chatgpt.com/codex/settings/usage", "_blank", "noopener,noreferrer");
+    if (!opened) toast("Your browser blocked the usage dashboard. Allow pop-ups for Seneschal and try again.", "warn");
+    else toast("Opening OpenAI's official remaining allowance and reset-time dashboard.");
   }
 
   function openBrowserDialog() {
@@ -3671,9 +3736,13 @@
     $("#renameSessionButton").addEventListener("click", () => renameSession());
     $("#renameSessionForm").addEventListener("submit", saveSessionTitle);
     $("#cancelSessionRename").addEventListener("click", () => $("#renameSessionDialog").close());
+    $("#renameProjectForm").addEventListener("submit", saveProjectName);
+    $("#cancelProjectRename").addEventListener("click", () => { state.pendingRenameProject = ""; $("#renameProjectDialog").close(); });
     $("#moveSessionButton").addEventListener("click", openMoveSession);
     $("#moveSessionForm").addEventListener("submit", moveSession);
     $("#cancelSessionMove").addEventListener("click", () => $("#moveSessionDialog").close());
+    $("#openChatGPTUsageButton").addEventListener("click", openChatGPTUsage);
+    $("#settingsChatGPTUsageButton").addEventListener("click", openChatGPTUsage);
     els.projectForm.addEventListener("submit", addProject);
     $("#openInspectorButton").addEventListener("click", () => els.inspector.classList.add("open"));
     $("#closeInspectorButton").addEventListener("click", () => els.inspector.classList.remove("open"));
@@ -3707,7 +3776,7 @@
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommands(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newSession(); }
     });
-    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, els.messageEditDialog, els.browserDialog, els.vscodeDialog, els.agentEditorDialog, els.agentBoardDialog, els.agentBoardHistoryDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
+    [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, $("#renameProjectDialog"), els.messageEditDialog, els.browserDialog, els.vscodeDialog, els.agentEditorDialog, els.agentBoardDialog, els.agentBoardHistoryDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
     els.instructionDialog.addEventListener("click", (event) => { if (event.target === els.instructionDialog) closeInstructionStudio(); });
     document.addEventListener("visibilitychange", syncMotionState);
     window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); stopAgentBoardMonitor(); });

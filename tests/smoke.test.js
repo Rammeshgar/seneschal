@@ -246,6 +246,28 @@ test("composer controls wrap cleanly when zoom reduces available width", () => {
   assert.match(styles, /\.send-group \{ width: 100%; justify-content: flex-end; \}/);
 });
 
+test("approvals remain visible and projects have safe display-name controls", () => {
+  const html = read("app/index.html");
+  const app = read("app/app.js");
+  assert.match(app, /function mergePermissionSnapshot/);
+  assert.match(app, /permissionMisses\[permission\.id\] < 10/);
+  assert.match(app, /refreshDirectoryData[\s\S]*mergePermissionSnapshot/);
+  assert.match(app, /permissionDirectory = state\.sessions\.find/);
+  assert.match(html, /renameProjectDialog/);
+  assert.match(app, /seneschal-project-aliases/);
+  assert.match(app, /data-rename-project/);
+  assert.match(app, /function saveProjectName/);
+});
+
+test("Plus usage controls open OpenAI's official allowance dashboard", () => {
+  const html = read("app/index.html");
+  const app = read("app/app.js");
+  assert.match(html, /openChatGPTUsageButton/);
+  assert.match(html, /settingsChatGPTUsageButton/);
+  assert.match(app, /https:\/\/chatgpt\.com\/codex\/settings\/usage/);
+  assert.match(app, /function openChatGPTUsage/);
+});
+
 test("Visual Studio Code bridge opens WSL projects and provides an in-editor AI workspace", () => {
   const html = read("app/index.html");
   const app = read("app/app.js");
