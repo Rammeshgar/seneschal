@@ -164,6 +164,7 @@ class SeneschalViewProvider {
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((message) => this.handle(message));
     view.onDidDispose(() => { if (this.pollTimer) clearTimeout(this.pollTimer); this.view = null; });
+    view.onDidChangeVisibility(() => { if (view.visible) this.refresh(); });
     this.refresh();
   }
 
@@ -171,6 +172,8 @@ class SeneschalViewProvider {
   error(error) { this.post({ type: "error", message: error.message || String(error) }); }
 
   async refresh(silent = false) {
+    const revision = this.refreshRevision = (this.refreshRevision || 0) + 1;
+    const originalSessionID = this.sessionID;
     return runSafely(async () => {
       const connection = readConnection();
       this.directory = projectDirectory();
@@ -181,6 +184,7 @@ class SeneschalViewProvider {
         request(connection, "GET", "/api/session/status"),
         request(connection, "GET", `/api/permission?${query}`).catch(() => [])
       ]);
+      if (revision !== this.refreshRevision || originalSessionID !== this.sessionID || !this.view) return;
       const roots = (Array.isArray(sessions) ? sessions : []).filter((session) => !session.parentID);
       if (!roots.some((session) => session.id === this.sessionID)) this.sessionID = roots[0]?.id || "";
       const models = providerModels(providers);
@@ -191,7 +195,9 @@ class SeneschalViewProvider {
       await this.context.workspaceState.update("seneschal.model", this.model);
       await this.context.workspaceState.update("seneschal.sessionModels", this.sessionModels);
       const selected = roots.find((session) => session.id === this.sessionID);
+      const selectedID = this.sessionID;
       const messages = selected ? await request(connection, "GET", `/api/session/${encodeURIComponent(selected.id)}/message?${query}`) : [];
+      if (revision !== this.refreshRevision || selectedID !== this.sessionID || !this.view) return;
       this.post({
         type: "state",
         project: path.basename(this.directory),
@@ -207,7 +213,7 @@ class SeneschalViewProvider {
         history: historyFromMessages(messages)
       });
       this.schedulePoll();
-    }, (error) => { if (!silent) this.error(error); });
+    }, (error) => { if (revision === this.refreshRevision) { this.error(error); this.schedulePoll(); } });
   }
 
   schedulePoll() {

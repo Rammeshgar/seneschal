@@ -206,12 +206,14 @@ function rejectUnauthorized(response) {
 }
 
 function checkUpstream(callback) {
+  let settled = false;
+  const finish = (ready) => { if (!settled) { settled = true; callback(ready); } };
   const request = http.get({ hostname: host, port: upstreamPort, path: "/global/health", timeout: 900, headers: { authorization: upstreamAuthorization } }, (response) => {
     response.resume();
-    callback(response.statusCode === 200);
+    finish(response.statusCode === 200);
   });
-  request.on("error", () => callback(false));
-  request.on("timeout", () => { request.destroy(); callback(false); });
+  request.on("error", () => finish(false));
+  request.on("timeout", () => { request.destroy(); finish(false); });
 }
 
 function startUpstream() {
@@ -233,6 +235,10 @@ function startUpstream() {
   upstream.on("exit", (code) => {
     if (!shuttingDown && code) console.error(`OpenCode exited with code ${code}.`);
   });
+  upstream.on("error", (error) => {
+    console.error(`Could not launch OpenCode through WSL: ${error.message}`);
+    shutdown(1);
+  });
 }
 
 function ensureOpenCodeModelCatalog() {
@@ -245,18 +251,18 @@ function ensureOpenCodeModelCatalog() {
 
     const openai = config.provider.openai && typeof config.provider.openai === "object" ? config.provider.openai : {};
     openai.models = openai.models && typeof openai.models === "object" ? openai.models : {};
-    openai.models["gpt-6-astra"] = {
-      ...(openai.models["gpt-6-astra"] || {}),
-      name: "GPT-6 Astra",
-      limit: { context: 1050000, output: 128000 },
-      variants: {
-        low: { reasoningEffort: "low" },
-        medium: { reasoningEffort: "medium" },
-        high: { reasoningEffort: "high" },
-        xhigh: { reasoningEffort: "xhigh" },
-        max: { reasoningEffort: "max" }
-      }
+    const registerOpenAIModel = (id, name, efforts) => {
+      openai.models[id] = {
+        ...(openai.models[id] || {}),
+        name,
+        limit: { context: 1050000, output: 128000 },
+        variants: Object.fromEntries(efforts.map((reasoningEffort) => [reasoningEffort, { reasoningEffort }]))
+      };
     };
+    registerOpenAIModel("gpt-6-astra", "GPT-6 Astra", ["low", "medium", "high", "xhigh", "max"]);
+    registerOpenAIModel("gpt-6.1-sol", "GPT-6.1 Sol", ["low", "medium", "high", "xhigh", "max"]);
+    registerOpenAIModel("gpt-6-sol", "GPT-6 Sol", ["none", "low", "medium", "high", "xhigh", "max"]);
+    registerOpenAIModel("gpt-6-luna", "GPT-6 Luna", ["none", "low", "medium", "high", "xhigh", "max"]);
     config.provider.openai = openai;
 
     if (fs.existsSync(ternaryBonsaiWeights)) {
@@ -286,6 +292,7 @@ function ensureOpenCodeModelCatalog() {
 }
 
 function waitForUpstream(attempt = 0) {
+  if (shuttingDown) return;
   checkUpstream((ready) => {
     if (ready) return startServers();
     if (attempt > 120) {
@@ -688,7 +695,17 @@ function waitForLocalBonsai(callback, attempt = 0) {
   }, wslHostAddress);
 }
 
+let bonsaiPreparation = null;
 function prepareLocalBonsai(callback) {
+  if (!bonsaiPreparation) {
+    bonsaiPreparation = new Promise((resolve, reject) => {
+      startLocalBonsai((error, result) => error ? reject(error) : resolve(result));
+    }).finally(() => { bonsaiPreparation = null; });
+  }
+  bonsaiPreparation.then((result) => callback(null, result), (error) => callback(error));
+}
+
+function startLocalBonsai(callback) {
   if (!fs.existsSync(ternaryBonsaiWeights)) return callback(new Error("The Ternary Bonsai 27B PQ2_0 model was not found in Bionic's model folder."));
   if (!fs.existsSync(prismServerExecutable)) return callback(new Error("The PrismML runtime for Ternary Bonsai is not installed in Seneschal."));
   localPortReady(prismPort, (ready) => {
@@ -718,6 +735,7 @@ function prepareLocalBonsai(callback) {
     bonsaiRuntime.once("error", (error) => done(error));
     bonsaiRuntime.once("exit", (code) => {
       bonsaiRuntime = null;
+      done(new Error(`Ternary Bonsai stopped before becoming ready (exit ${code}). See data/bonsai-runtime.log.`));
       if (code && code !== 0) console.warn(`Ternary Bonsai runtime exited with code ${code}.`);
     });
     waitForLocalBonsai(done);

@@ -3,6 +3,25 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../app/app.js'), 'utf8');
+test('late messages cannot overwrite a different session or a newer refresh', async () => {
+  const pending = [];
+  const state = { currentSessionID: 'a', messages: [] };
+  const c = harness(['refreshMessages'], {
+    state, selectedSession: () => ({ id: state.currentSessionID, directory: '/project' }),
+    api: () => new Promise(resolve => pending.push(resolve)),
+    renderMessages() {}, renderUsage() {}, toast() {}
+  });
+  const first = c.refreshMessages();
+  state.currentSessionID = 'b';
+  const second = c.refreshMessages();
+  pending[1](['b-current']); await second;
+  pending[0](['a-stale']); await first;
+  assert.deepEqual(state.messages, ['b-current']);
+  const older = c.refreshMessages(); const newer = c.refreshMessages();
+  pending[3](['b-newer']); await newer;
+  pending[2](['b-older']); await older;
+  assert.deepEqual(state.messages, ['b-newer']);
+});
 function harness(names, extras = {}) {
   const context = vm.createContext({ crypto: require('node:crypto'), Date, state: {}, ...extras });
   for (const name of names) {

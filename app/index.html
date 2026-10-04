@@ -24,11 +24,16 @@
         </button>
 
         <div class="top-model">
-          <label class="select-wrap model-select-wrap" title="Active model">
+          <div class="model-select-wrap" id="modelPicker">
             <span class="provider-orb" id="providerOrb"></span>
-            <select id="modelSelect" aria-label="Active AI model"></select>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
-          </label>
+            <button class="model-picker-button" id="modelPickerButton" type="button" aria-label="Select AI model" aria-haspopup="listbox" aria-expanded="false"><span id="modelPickerLabel">Select model</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button>
+            <select id="modelSelect" aria-label="Active AI model" hidden></select>
+            <div class="model-picker-menu" id="modelPickerMenu" hidden>
+              <label class="model-picker-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="modelSearchInput" type="search" placeholder="Search models…" autocomplete="off" aria-label="Search models" /></label>
+              <div class="model-picker-groups" id="modelPickerGroups" role="listbox" aria-label="Available AI models"></div>
+              <div class="model-picker-empty" id="modelPickerEmpty" hidden>No matching models</div>
+            </div>
+          </div>
           <span class="connection-pill" id="connectionPill"><i></i><span>Connecting</span></span>
         </div>
 

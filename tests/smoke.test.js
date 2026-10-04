@@ -34,7 +34,7 @@ test("machine settings are discovered and requested model additions preserve pro
   const server = read("server.js");
   assert.match(server, /settings\.json/);
   assert.match(server, /SENESCHAL_WSL_DISTRO/);
-  assert.match(server, /openai\.models\["gpt-6-astra"\]/);
+  assert.match(server, /registerOpenAIModel\("gpt-6-astra", "GPT-6 Astra"/);
   assert.match(server, /original\.replace\(\/\^\(\?:\\uFEFF\|ï»¿\)\+\//);
   assert.match(server, /Ternary-Bonsai-27B-PQ2_0\.gguf/);
   assert.match(server, /bonsai\.models\["ternary-bonsai-27b"\]/);
@@ -78,7 +78,7 @@ test("workspace pulse uses fixed OpenCode work and ambient event buckets", () =>
 test("public launch materials reference privacy-safe visual assets", () => {
   const readme = read("README.md");
   assert.match(readme, /assets\/social\/seneschal-social-preview\.png/);
-  assert.match(readme, /docs\/images\/seneschal-workspace-night\.png/);
+  assert.match(readme, /(?:docs\/images\/seneschal-workspace-night\.png|github\.com\/user-attachments\/assets\/)/);
   assert.match(readme, /docs\/images\/seneschal-agent-board-night\.png/);
   assert.match(readme, /privacy-safe product illustration/);
   assert.ok(fs.existsSync(path.join(root, "assets/social/seneschal-linkedin-launch.png")));
@@ -171,12 +171,30 @@ test("model choices are isolated per session and background work survives naviga
 
 test("current OpenAI and configured local Ternary models are available in Seneschal", () => {
   const app = read("app/app.js");
-  assert.match(app, /openai: \["gpt-6-astra", "gpt-5\.6-terra"/);
+  const server = read("server.js");
+  assert.match(app, /openai: \["gpt-6-astra", "gpt-6\.1-sol", "gpt-6-sol", "gpt-6-luna"/);
   assert.match(app, /currentOpenAIModels/);
+  assert.match(app, /openAIModel\("gpt-6\.1-sol", "GPT-6\.1 Sol"/);
+  assert.match(app, /openAIModel\("gpt-6-luna", "GPT-6 Luna"/);
+  assert.match(server, /registerOpenAIModel\("gpt-6\.1-sol", "GPT-6\.1 Sol"/);
+  assert.match(server, /registerOpenAIModel\("gpt-6-luna", "GPT-6 Luna"/);
   assert.match(app, /providerModels\.push\(model\)/);
   assert.match(app, /bonsai: \["ternary-bonsai-27b"\]/);
   assert.match(app, /configuredLocal = provider\.id === "bonsai" && provider\.source === "custom"/);
   assert.match(app, /\["openai", "bonsai", "google", "opencode", "deepseek"\]/);
+});
+
+test("model picker supports searchable collapsible provider categories", () => {
+  const html = read("app/index.html");
+  const app = read("app/app.js");
+  const css = read("app/styles.css");
+  assert.match(html, /id="modelSearchInput"/);
+  assert.match(html, /id="modelPickerGroups"/);
+  assert.match(app, /function renderModelPicker/);
+  assert.match(app, /model-provider-group/);
+  assert.match(app, /data-model-value/);
+  assert.match(css, /\.model-provider-group\[open\]/);
+  assert.match(css, /\.model-picker-option\.selected/);
 });
 
 test("Agent Board coordinates real sessions with persistent dependency handoffs", () => {

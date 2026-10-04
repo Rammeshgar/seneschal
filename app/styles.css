@@ -98,8 +98,32 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .select-wrap { position: relative; display: flex; align-items: center; }
 .select-wrap select { appearance: none; min-width: 0; border: 1px solid var(--line); background: var(--raised); outline: none; cursor: pointer; }
 .select-wrap svg { position: absolute; right: 9px; width: 14px; height: 14px; pointer-events: none; color: var(--muted); }
-.model-select-wrap { min-width: 0; flex: 1; }
-.model-select-wrap select { width: 100%; height: 34px; border-radius: 7px; padding: 0 27px 0 29px; font-size: 12px; font-weight: 650; text-overflow: ellipsis; }
+.model-select-wrap { position: relative; min-width: 0; flex: 1; }
+.model-picker-button { width: 100%; height: 34px; display: flex; align-items: center; border: 1px solid var(--line); border-radius: 7px; padding: 0 27px 0 29px; background: var(--raised); color: var(--ink); cursor: pointer; text-align: left; font-size: 12px; font-weight: 650; }
+.model-picker-button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-picker-button > svg { position: absolute; right: 9px; width: 14px; height: 14px; color: var(--muted); transition: transform .16s ease; }
+.model-picker-button[aria-expanded="true"] { border-color: var(--forest); box-shadow: 0 0 0 2px color-mix(in srgb, var(--forest) 12%, transparent); }
+.model-picker-button[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.model-picker-menu { position: absolute; z-index: 90; top: calc(100% + 6px); left: 0; width: min(390px, calc(100vw - 24px)); max-height: min(580px, calc(100vh - 90px)); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: color-mix(in srgb, var(--recessed) 97%, transparent); box-shadow: 0 18px 55px rgba(0,0,0,.38); backdrop-filter: blur(18px); }
+.model-picker-search { display: flex; align-items: center; gap: 8px; margin: 9px; padding: 0 10px; height: 36px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); }
+.model-picker-search:focus-within { border-color: var(--forest); }
+.model-picker-search svg { position: static; width: 15px; height: 15px; color: var(--muted); }
+.model-picker-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; }
+.model-picker-groups { max-height: min(490px, calc(100vh - 160px)); overflow: auto; padding: 0 7px 8px; }
+.model-provider-group { border-top: 1px solid var(--line); }
+.model-provider-group:first-child { border-top: 0; }
+.model-provider-group summary { min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 8px; color: var(--muted); cursor: pointer; list-style: none; font: 700 9px/1 ui-monospace, "Cascadia Code", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.model-provider-group summary::-webkit-details-marker { display: none; }
+.model-provider-group summary span { flex: 1; }
+.model-provider-group summary small { padding: 3px 6px; border-radius: 8px; background: var(--raised-2); color: var(--faint); }
+.model-provider-group summary svg { position: static; width: 12px; height: 12px; transition: transform .16s ease; }
+.model-provider-group[open] summary svg { transform: rotate(180deg); }
+.model-provider-options { display: grid; gap: 3px; padding: 0 2px 7px; }
+.model-picker-option { min-height: 40px; display: grid; align-content: center; gap: 3px; padding: 6px 10px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; }
+.model-picker-option:hover { border-color: var(--line); background: var(--raised); }
+.model-picker-option.selected { border-color: color-mix(in srgb, var(--forest) 55%, var(--line)); background: color-mix(in srgb, var(--forest) 10%, var(--raised)); }
+.model-picker-option small { color: var(--faint); font: 500 8px/1.2 ui-monospace, "Cascadia Code", monospace; }
+.model-picker-empty { padding: 22px; color: var(--muted); text-align: center; font-size: 11px; }
 .provider-orb { position: absolute; left: 10px; z-index: 1; width: 8px; height: 8px; border-radius: 2px; background: var(--cobalt); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cobalt) 15%, transparent); }
 .connection-pill { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font: 650 8px/1 ui-monospace, "Cascadia Code", monospace; text-transform: uppercase; letter-spacing: .08em; }
 .connection-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--ochre); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ochre) 14%, transparent); }

@@ -96,7 +96,7 @@
   };
 
   const els = {
-    connection: $("#connectionPill"), model: $("#modelSelect"), providerOrb: $("#providerOrb"),
+    connection: $("#connectionPill"), model: $("#modelSelect"), providerOrb: $("#providerOrb"), modelPicker: $("#modelPicker"), modelPickerButton: $("#modelPickerButton"), modelPickerLabel: $("#modelPickerLabel"), modelPickerMenu: $("#modelPickerMenu"), modelSearch: $("#modelSearchInput"), modelPickerGroups: $("#modelPickerGroups"), modelPickerEmpty: $("#modelPickerEmpty"),
     projectList: $("#projectList"), pinnedSessionList: $("#pinnedSessionList"), pinnedSessionCount: $("#pinnedSessionCount"), sessionList: $("#sessionList"), sessionCount: $("#sessionCount"), archivedSessionsButton: $("#archivedSessionsButton"), archivedSessionsCount: $("#archivedSessionsCount"),
     projectsRail: $("#projectsRailSection"), pinnedSessionsRail: $("#pinnedSessionsRailSection"), sessionsRail: $("#sessionsRailSection"),
     welcome: $("#welcomeView"), messageScroll: $("#messageScroll"), messageList: $("#messageList"), messageMap: $("#messageMap"), resumeFollow: $("#resumeFollowButton"),
@@ -938,22 +938,28 @@
     const connected = new Set(state.providers.connected || []);
     const curated = {
       google: ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash-lite"],
-      openai: ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-sol"],
+      openai: ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
       bonsai: ["ternary-bonsai-27b"],
       deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"]
     };
-    const currentOpenAIModels = [{
-      id: "gpt-6-astra",
+    const openAIModel = (id, name, family, cost, efforts) => ({
+      id,
       providerID: "openai",
-      name: "GPT-6 Astra",
-      family: "gpt-astra",
-      api: { id: "gpt-6-astra", npm: "@ai-sdk/openai", url: "" },
+      name,
+      family,
+      api: { id, npm: "@ai-sdk/openai", url: "" },
       capabilities: { temperature: false, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: true, video: false, pdf: true }, output: { text: true, audio: false, image: false, video: false, pdf: false } },
-      cost: { input: 10, output: 50, cache: { read: 1, write: 0 } },
+      cost,
       limit: { context: 1050000, input: 922000, output: 128000 },
       status: "active",
-      variants: Object.fromEntries(["low", "medium", "high", "xhigh", "max"].map((reasoningEffort) => [reasoningEffort, { reasoningEffort, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] }]))
-    }];
+      variants: Object.fromEntries(efforts.map((reasoningEffort) => [reasoningEffort, { reasoningEffort, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] }]))
+    });
+    const currentOpenAIModels = [
+      openAIModel("gpt-6-astra", "GPT-6 Astra", "gpt-astra", { input: 10, output: 50, cache: { read: 1, write: 12.5 } }, ["low", "medium", "high", "xhigh", "max"]),
+      openAIModel("gpt-6.1-sol", "GPT-6.1 Sol", "gpt-6.1", { input: 2, output: 10, cache: { read: .1, write: 2.5 } }, ["low", "medium", "high", "xhigh", "max"]),
+      openAIModel("gpt-6-sol", "GPT-6 Sol", "gpt-6", { input: 2, output: 10, cache: { read: .2, write: 2.5 } }, ["none", "low", "medium", "high", "xhigh", "max"]),
+      openAIModel("gpt-6-luna", "GPT-6 Luna", "gpt-6", { input: .1, output: .5, cache: { read: .01, write: .125 } }, ["none", "low", "medium", "high", "xhigh", "max"])
+    ];
     const list = [];
     for (const provider of state.providers.all || []) {
       const configuredLocal = provider.id === "bonsai" && provider.source === "custom";
@@ -991,9 +997,42 @@
       groups.get(model.providerName).push(model);
     });
     els.model.innerHTML = [...groups.entries()].map(([provider, models]) => `<optgroup label="${escapeHTML(provider)}">${models.map((model) => `<option value="${escapeHTML(model.value)}"${model.value === state.selectedModel ? " selected" : ""}>${escapeHTML(model.name)}</option>`).join("")}</optgroup>`).join("");
+    renderModelPicker();
     if (!current) storage.set("atelier-model", state.selectedModel);
     renderModelCapability();
     renderModelVariants();
+  }
+
+  function renderModelPicker(query = els.modelSearch?.value || "") {
+    const selected = selectedModel();
+    els.modelPickerLabel.textContent = selected?.name || "Select model";
+    const needle = query.trim().toLowerCase();
+    const groups = new Map();
+    state.models.forEach((model) => {
+      if (needle && !`${model.name} ${model.providerName} ${model.id}`.toLowerCase().includes(needle)) return;
+      if (!groups.has(model.providerName)) groups.set(model.providerName, []);
+      groups.get(model.providerName).push(model);
+    });
+    els.modelPickerEmpty.hidden = groups.size > 0;
+    els.modelPickerGroups.innerHTML = [...groups.entries()].map(([provider, models]) => {
+      const hasSelected = models.some((model) => model.value === state.selectedModel);
+      return `<details class="model-provider-group"${needle || hasSelected ? " open" : ""}><summary><span>${escapeHTML(provider)}</span><small>${models.length}</small><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary><div class="model-provider-options">${models.map((model) => `<button type="button" class="model-picker-option${model.value === state.selectedModel ? " selected" : ""}" data-model-value="${escapeHTML(model.value)}" role="option" aria-selected="${model.value === state.selectedModel}"><span>${escapeHTML(model.name)}</span><small>${escapeHTML(model.id)}</small></button>`).join("")}</div></details>`;
+    }).join("");
+  }
+
+  function closeModelPicker() {
+    els.modelPickerMenu.hidden = true;
+    els.modelPickerButton.setAttribute("aria-expanded", "false");
+  }
+
+  function selectModel(value) {
+    if (!state.models.some((model) => model.value === value)) return;
+    state.selectedModel = value;
+    els.model.value = value;
+    if (selectedSession()) rememberSessionModel(); else storage.set("atelier-model", value);
+    renderModelPicker(); renderModelCapability(); renderModelVariants(); renderUsage(); closeModelPicker();
+    const model = selectedModel();
+    if (model?.providerID === "opencode" && model.id === "deepseek-v4-flash-free") toast("DeepSeek V4 Flash Free is currently returning provider outages. Seneschal will stop repeated 503 retries.", "warn");
   }
 
   function renderModelVariants() {
@@ -1584,7 +1623,8 @@
     const unmet = agent.dependencies.map(boardAgent).filter((item) => !item || item.status !== "complete");
     if (unmet.length) { if (manual) toast(`${agent.name} is waiting for ${unmet.map((item) => item?.name || "a dependency").join(", ")}.`, "warn"); return false; }
     const directory = state.agentBoard.directory || state.currentDirectory;
-    const model = state.models.find((item) => item.value === agent.model) || selectedModel() || state.models[0];
+    const model = state.models.find((item) => item.value === agent.model);
+    if (!model) { agent.status = "failed"; agent.error = "The selected model is unavailable. Edit this agent and select a connected model."; scheduleAgentBoardSave(); renderAgentBoard(); return false; }
     if (!directory || !model) { toast("Choose a project and connected model before running the board.", "warn"); return false; }
     agent.status = "running"; agent.error = ""; agent.activity = "Creating or reconnecting the worker session…"; agent.activityType = "Starting"; agent.activityAt = Date.now(); agent.startedAt = Date.now(); agent.completedAt = 0;
     state.agentBoard.active = true; state.agentBoard.paused = false;
@@ -2528,13 +2568,16 @@
   }
 
   async function refreshMessages(scroll = false) {
+    const requestID = state.messageRefreshID = (state.messageRefreshID || 0) + 1;
     const session = selectedSession();
     if (!session) { state.messages = []; renderMessages(); return; }
     try {
-      state.messages = await api(`/session/${encodeURIComponent(session.id)}/message`, { directory: session.directory });
+      const messages = await api(`/session/${encodeURIComponent(session.id)}/message`, { directory: session.directory });
+      if (requestID !== state.messageRefreshID || state.currentSessionID !== session.id) return;
+      state.messages = messages;
       renderMessages(scroll);
       renderUsage();
-    } catch (error) { toast(`Could not load messages: ${error.message}`, "error"); }
+    } catch (error) { if (requestID === state.messageRefreshID && state.currentSessionID === session.id) toast(`Could not load messages: ${error.message}`, "error"); }
   }
 
   async function refreshSessions() {
@@ -2547,12 +2590,15 @@
 
   async function refreshDirectoryData() {
     if (!state.currentDirectory) return;
+    const requestID = state.directoryRefreshID = (state.directoryRefreshID || 0) + 1;
+    const sessionID = state.currentSessionID;
     const dir = selectedSession()?.directory || state.currentDirectory;
     const results = await Promise.allSettled([
       api("/config", { directory: dir }), api("/agent", { directory: dir }),
       api("/experimental/tool/ids", { directory: dir }), api("/permission", { directory: dir }),
       api("/session/status", { directory: dir }), api("/mcp", { directory: dir }), api("/command", { directory: dir })
     ]);
+    if (requestID !== state.directoryRefreshID || sessionID !== state.currentSessionID || dir !== (selectedSession()?.directory || state.currentDirectory)) return;
     if (results[0].status === "fulfilled") state.config = results[0].value;
     if (results[1].status === "fulfilled") state.agents = results[1].value;
     if (results[2].status === "fulfilled") state.tools = results[2].value;
@@ -2600,6 +2646,7 @@
     state.userScrolledAway = false;
     renderAll();
     await refreshMessages(true);
+    if (state.currentSessionID === id) await refreshDirectoryData();
     if (previousStillRunning) toast(`${previous.title || "Previous session"} is still running in the background.`);
   }
 
@@ -3505,7 +3552,7 @@
       { icon: "S", title: session.title || "Untitled session", subtitle: `Open · ${basename(session.directory)}`, kind: "Session", run: () => selectSession(session.id) },
       { icon: "@", title: `Reference: ${session.title || "Untitled session"}`, subtitle: "Bring this conversation into the current prompt", kind: "Reference", run: () => insertSessionReference(session) }
     ]));
-    const models = state.models.map((model) => ({ icon: "M", title: model.name, subtitle: `${model.providerName} · current session only`, kind: "Model", run: () => { state.selectedModel = model.value; els.model.value = model.value; rememberSessionModel(); renderModelCapability(); renderModelVariants(); renderUsage(); } }));
+    const models = state.models.map((model) => ({ icon: "M", title: model.name, subtitle: `${model.providerName} · current session only`, kind: "Model", run: () => selectModel(model.value) }));
     return [...base, ...engineCommands, ...sessions, ...models];
   }
 
@@ -3692,7 +3739,12 @@
       if (innerWidth <= 680) { $(".sidebar").classList.toggle("open"); return; }
       state.currentSessionID = ""; state.messages = []; storage.set("atelier-session", ""); renderAll();
     });
-    els.model.addEventListener("change", () => { state.selectedModel = els.model.value; if (selectedSession()) rememberSessionModel(); else storage.set("atelier-model", state.selectedModel); renderModelCapability(); renderModelVariants(); renderUsage(); const model = selectedModel(); if (model?.providerID === "opencode" && model.id === "deepseek-v4-flash-free") toast("DeepSeek V4 Flash Free is currently returning provider outages. Seneschal will stop repeated 503 retries.", "warn"); });
+    els.model.addEventListener("change", () => selectModel(els.model.value));
+    els.modelPickerButton.addEventListener("click", () => { const opening = els.modelPickerMenu.hidden; els.modelPickerMenu.hidden = !opening; els.modelPickerButton.setAttribute("aria-expanded", String(opening)); if (opening) { els.modelSearch.value = ""; renderModelPicker(); requestAnimationFrame(() => els.modelSearch.focus()); } });
+    els.modelSearch.addEventListener("input", () => renderModelPicker(els.modelSearch.value));
+    els.modelPickerGroups.addEventListener("click", (event) => { const option = event.target.closest("[data-model-value]"); if (option) selectModel(option.dataset.modelValue); });
+    document.addEventListener("click", (event) => { if (!els.modelPicker.contains(event.target)) closeModelPicker(); });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !els.modelPickerMenu.hidden) { closeModelPicker(); els.modelPickerButton.focus(); } });
     els.modelVariant.addEventListener("change", () => { const model = selectedModel(); if (!model) return; state.selectedVariants[model.value] = els.modelVariant.value; storage.set("atelier-model-variants", state.selectedVariants); });
     els.agent.addEventListener("change", () => { state.selectedAgent = els.agent.value; storage.set("atelier-agent", state.selectedAgent); els.inspectorAgent.textContent = agentDisplayName(state.selectedAgent); renderInspector(); renderInstructionStack(); renderModelCapability(); if (state.selectedAgent === "chat") toast("Chat mode enabled. All tools and system actions are off."); });
     els.form.addEventListener("submit", (event) => { event.preventDefault(); sendPrompt(els.prompt.value); });
