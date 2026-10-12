@@ -98,6 +98,8 @@ const staticFiles = new Map([
   ["/index.html", ["index.html", "text/html; charset=utf-8"]],
   ["/workspace/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ["/workspace/app.js", ["app.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/markdown.js", ["markdown.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/maintenance.js", ["maintenance.js", "application/javascript; charset=utf-8"]],
   ["/workspace/favicon.svg", ["favicon.svg", "image/svg+xml"]],
   ["/workspace/favicon.ico", ["favicon.ico", "image/x-icon"]],
   ["/workspace/favicon.png", ["favicon.png", "image/png"]],
@@ -111,7 +113,7 @@ const securityHeaders = {
   "x-frame-options": "DENY",
   "referrer-policy": "no-referrer",
   "permissions-policy": "camera=(), geolocation=(), microphone=(self)",
-  "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+  "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; frame-src http://localhost:3030 http://127.0.0.1:3030; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 };
 
 let upstream = null;
@@ -936,7 +938,16 @@ function restartPlaywrightBridge(directory, callback) {
   });
 }
 
+const maintenance = require('./scripts/maintenance-server').createMaintenance({ root: installDirectory, distribution: wslDistribution, linuxHome: wslLinuxHome, shutdown });
+
 function handleWorkspaceEndpoint(request, response, pathname) {
+  const maintenanceActions = { '/workspace/updates/check': ['GET', 'check'], '/workspace/updates/install': ['POST', 'update'], '/workspace/engine-updates/check': ['GET', 'engineCheck'], '/workspace/engine-updates/install': ['POST', 'engineUpdate'], '/workspace/agent-trail/start': ['POST', 'startTrail'] };
+  if (maintenanceActions[pathname]) {
+    const [method, action] = maintenanceActions[pathname];
+    if (request.method !== method) { json(response, 405, { error: 'Method not allowed' }); return true; }
+    maintenance[action]().then(result => json(response, 200, result)).catch(error => endpointError(response, error));
+    return true;
+  }
   const requestUrl = new URL(request.url, `http://${request.headers.host || `${host}:${publicPort}`}`);
   if (pathname === "/workspace/session-projects") {
     const filename = path.join(dataDirectory, "session-projects.json");

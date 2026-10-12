@@ -10,6 +10,22 @@ This is a public beta. It is useful today, but it is not a replacement for under
 
 ## What it is
 
+### Reading, updates, and activity
+
+Latest prepared version: **0.2.1-beta.19**. The compact composer includes Voice/dictation and conversation options, More options for agent and reasoning effort, a persistent Latest button, and a collapse control that preserves drafts while reading.
+
+Update checks distinguish the Seneschal application from the OpenCode engine. Engine updates target a stable release on the installed major version; finish active tasks first and restart the engine afterward to activate its installed binary.
+
+Expand **Live agent activity** below the prompt for the current session's recent recorded events and an embedded Agent Trail dashboard. Embedding is allowed only from the local dashboard on port 3030; an external-window fallback is available. Neither view reveals private model reasoning: only provider-reported summaries and recorded activity are shown.
+
+Responses render Markdown tables, headings, lists, quotes, and code blocks. Wide tables scroll inside the message instead of overflowing the workspace.
+
+In **Settings → App updates**, check GitHub anytime and install a newer published ZIP release. Downloads must match GitHub's SHA-256 digest. The updater backs up managed app files under `data/update-*`, preserves `data`, `config`, and model/browser runtimes, then restarts. Stop active agents before updating. Source Git checkouts are deliberately excluded; update those with Git. Failures are recorded in `data/update.log`.
+
+In **Settings → Agent activity**, inspect events received by the active project connection, filter by session, expand tool details, pause the view, or export up to 1,000 captured events. This capture lasts for the current window; it cannot reveal hidden model reasoning or events OpenCode does not emit.
+
+The same panel can install/open [Agent Trail](https://github.com/camtrik/agent-trail), an optional third-party history/usage/replay dashboard. First launch installs the pinned `@camtrik/agent-trail@0.1.7` package under `~/.local/share/seneschal-agent-trail` in WSL. It needs Node 22+, npm, and internet for installation; OpenCode history is read locally from its SQLite database. The dashboard opens at `http://localhost:3030`, with startup details in `data/agent-trail.log`. Do not expose its dashboard or ingest service to untrusted networks.
+
 - A custom browser interface served only on `127.0.0.1`
 - A secure local proxy in front of OpenCode's server
 - A Windows launcher for an OpenCode installation inside WSL

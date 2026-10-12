@@ -159,7 +159,7 @@
           <div class="permission-dock" id="permissionDock" hidden></div>
 
           <form class="composer" id="composerForm">
-            <div class="composer-topline"><span id="composerProject">No project selected</span><span class="composer-top-actions"><span id="modelCapability">Text + tools</span><button type="button" id="composerMinimizeButton" aria-label="Minimize message input">Minimize</button><button type="button" id="composerSizeButton" aria-label="Maximize message input">Maximize</button></span></div>
+            <div class="composer-topline"><span id="composerProject">No project selected</span><span class="composer-top-actions"><span id="modelCapability" hidden>Text + tools</span><button type="button" id="composerMinimizeButton" aria-label="Minimize message input" hidden>Minimize</button><button type="button" id="composerSizeButton" aria-label="Maximize message input" title="Expand prompt">↗</button></span></div>
             <textarea id="promptInput" rows="1" placeholder="Describe the desired state, ask a question, or use / for commands…" aria-label="Message Seneschal"></textarea>
             <div class="attachment-strip" id="attachmentStrip" hidden></div>
             <div class="composer-footer">
@@ -297,6 +297,8 @@
         <div class="modal-kicker">SENESCHAL CONTROL</div>
         <h2>Workspace settings</h2>
         <div class="settings-grid">
+          <button class="setting-card interactive-setting" type="button" id="settingsUpdatesButton"><span>App and engine updates</span><strong>Check for updates</strong><small>Check and update Seneschal and OpenCode separately</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsTrailButton"><span>Agent activity</span><strong>Live dashboard / Agent Trail</strong><small>Inspect live events and OpenCode session history</small></button>
           <button class="setting-card interactive-setting" type="button" id="openInstructionsButton"><span>Instructions Studio</span><strong id="settingsInstructions">Ready</strong><small>Persona, rules, agent roles, and skills</small></button>
           <button class="setting-card interactive-setting chatgpt-setting" type="button" id="settingsChatGPTButton"><span>ChatGPT companion</span><strong>Normal Chat</strong><small>Separate ChatGPT allowance · opens securely</small></button>
           <button class="setting-card interactive-setting chatgpt-usage-setting" type="button" id="settingsChatGPTUsageButton"><span>Plus agent usage</span><strong>Official usage dashboard</strong><small>Check remaining 5-hour and weekly Work/Codex allowance</small></button>

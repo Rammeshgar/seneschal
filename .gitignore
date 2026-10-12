@@ -13,3 +13,4 @@ obsolete-seneschal-material/
 !.env.example
 .DS_Store
 Thumbs.db
+/.test-temp/

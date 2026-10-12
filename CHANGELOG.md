@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.1-beta.19 — 2026-10-12
+
+- Check and update Seneschal and OpenCode independently; explicitly label unavailable updates and keep engine upgrades on the installed major version.
+- Match the engine launcher's shell environment for update checks and fix unreadable service error responses.
+- Embed the local Agent Trail dashboard with narrowly scoped frame permissions and an external-window fallback; add session-filtered chat activity for recorded tools and provider-reported summaries.
+- Simplify the composer with a unified Voice control, secondary agent settings under More options, and browser controls retained in the inspector.
+- Improve prompt contrast and compact sizing, restore a persistent Latest navigation button, and add a draft-preserving collapse control for reading.
+- Fit maintenance dialogs to the viewport with responsive cards and internal scrolling.
+- This remains a beta: live WSL upgrades and dashboard embedding require on-device verification. Private model reasoning is not exposed.
+
+## 0.2.1-beta.18 — 2026-10-12
+
+- Render Markdown tables, headings, lists, quotes, and fenced code as readable, escaped HTML; keep wide tables keyboard-scrollable.
+- Add Settings → App updates with GitHub release checks, checksum-verified downloads, backups, restart, and preservation of local data/config/runtime.
+- Add Settings → Agent activity with session filters, expandable live events, pause/resume, and JSON export.
+- Integrate optional Agent Trail 0.1.7 installation/launch in WSL for persistent OpenCode history and replay. Requires Node 22+; installation and startup errors are reported rather than hidden.
+- Automatic updates require a published release ZIP with a GitHub SHA-256 digest. Git source checkouts are not overwritten.
+
 ## 0.2.1-beta.17 — 2026-10-03
 
 - Keep approval requests visible while a session is working and through delayed permission snapshots, instead of briefly flashing and disappearing.

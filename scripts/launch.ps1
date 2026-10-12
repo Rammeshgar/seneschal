@@ -8,6 +8,11 @@ New-Item -ItemType Directory -Force -Path $data | Out-Null
 Add-Content -Encoding utf8 -LiteralPath $log -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting Seneschal (launcher $PID)"
 
 try {
+  $reaInstaller = Join-Path $PSScriptRoot 'install-rea-skill.ps1'
+  if (Test-Path -LiteralPath $reaInstaller) {
+    try { & $reaInstaller -InstallDirectory $root *>> $runLog }
+    catch { Add-Content -Encoding utf8 -LiteralPath $runLog -Value "REA skill installation deferred: $($_.Exception.Message)" }
+  }
   $node = Get-Command node.exe -ErrorAction Stop
   Push-Location $root
   try {
