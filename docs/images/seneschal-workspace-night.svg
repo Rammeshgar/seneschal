@@ -108,16 +108,16 @@
 
   <g transform="translate(380 616)">
     <rect width="838" height="190" rx="12" fill="#0f171d" stroke="#3a514c"/>
-    <text x="22" y="30" fill="#62716d" font-family="ui-monospace,Consolas,monospace" font-size="9" font-weight="700">PRODUCT WORKSPACE</text>
+    <text x="22" y="27" fill="#9db39f" font-family="Inter,Segoe UI,sans-serif" font-size="12">Project: product workspace</text>
+    <text x="650" y="27" fill="#57e6d9" font-family="Inter,Segoe UI,sans-serif" font-size="12">↓ Latest     ⌄     ↗</text>
+    <rect x="18" y="39" width="800" height="55" rx="8" fill="#090f14" stroke="#50636b"/>
     <text x="22" y="72" fill="#62716d" font-family="Inter,Segoe UI,sans-serif" font-size="15">Describe the desired state, ask a question, or use / for commands…</text>
-    <path d="M22 104h794" stroke="#26333a"/>
+    <text x="22" y="112" fill="#9db39f" font-family="Inter,Segoe UI,sans-serif" font-size="11">▸ Live agent activity</text>
     <g font-family="ui-monospace,Consolas,monospace" font-size="10" font-weight="700">
       <rect x="22" y="124" width="86" height="42" rx="8" fill="#151914" stroke="#6b5527"/><text x="45" y="150" fill="#ffb45e">SKILLS</text>
-      <rect x="118" y="124" width="72" height="42" rx="8" fill="#0a1015" stroke="#26333a"/><text x="139" y="150" fill="#9db39f">MIC</text>
-      <rect x="200" y="124" width="82" height="42" rx="8" fill="#0d151c" stroke="#355875"/><text x="220" y="150" fill="#8bb8ff">TALK</text>
-      <rect x="292" y="124" width="100" height="42" rx="8" fill="#0d151c" stroke="#355875"/><text x="312" y="150" fill="#8bb8ff">BROWSER</text>
-      <rect x="406" y="124" width="146" height="42" rx="8" fill="#151914" stroke="#6b5527"/><text x="426" y="150" fill="#ffb45e">THINKING · HIGH</text>
-      <rect x="566" y="124" width="180" height="42" rx="8" fill="#090f14" stroke="#26333a"/><text x="586" y="150" fill="#f3f6f5">SENESCHAL · BUILD</text>
+      <rect x="118" y="124" width="48" height="42" rx="8" fill="#0a1015" stroke="#26333a"/><text x="135" y="150" fill="#9db39f">＋</text>
+      <rect x="178" y="124" width="100" height="42" rx="8" fill="#0d151c" stroke="#355875"/><text x="195" y="150" fill="#8bb8ff">VOICE ▾</text>
+      <rect x="290" y="124" width="144" height="42" rx="8" fill="#090f14" stroke="#26333a"/><text x="307" y="150" fill="#9db39f">MORE OPTIONS ▾</text>
       <rect x="758" y="124" width="56" height="42" rx="8" fill="#14736b"/><text x="778" y="150" fill="#f3f6f5">↑</text>
     </g>
   </g>
