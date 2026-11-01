@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — source update 2026-11-01
+## 0.2.1-beta.20 — 2026-11-01
 
 - Add a private, owner-paired Phone Access gateway with PC-only management, filtered routes, device revocation and source-hash qualification.
 - Separate available tools from approval grants; migrate older conversation overrides only with consent and confirmed engine compatibility. Add visible question controls and uncertain-reply recovery.
@@ -11,7 +11,8 @@
 - Add hover/hold feature explanations, English/Persian UI, RTL-safe paths and translated dynamic panel messages.
 - Refine mobile Options, completed-tool collapse, non-overlapping notices/composer layout, compact sidebars and bounded hover motion.
 - Publish current source/tests, plain-language usage and private-access guides. Exclude local runtime files and replace developer-specific paths with explicit inputs.
-- This is a source refresh, not a new packaged ZIP or standalone desktop-installer release.
+- Soften decorative wallpaper visibility on home and conversation views while retaining personal visibility settings, animation and full-strength scene previews.
+- Update the interface screenshot and package the current workspace with the existing Windows/WSL installer. OpenCode, provider accounts and model/browser runtimes remain separate prerequisites.
 
 ## 0.2.1-beta.19 — 2026-10-12
 

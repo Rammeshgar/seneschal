@@ -1,10 +1,14 @@
-# Source update — November 1, 2026
+# Seneschal v0.2.1 beta 20 — November 1, 2026
 
-This repository refresh collects the work since the October 12 public update: private Phone Access, approval and question recovery, native Activity history, optional NVIDIA speech, the new Seneschal companion, local wallpaper worlds, English/Persian controls, contextual help and responsive layout improvements.
+Beta 20 packages the work since the October 12 public update: private Phone Access, approval and question recovery, native Activity history, optional NVIDIA speech, the new Seneschal companion, local wallpaper worlds, English/Persian controls, contextual help and responsive layout improvements. It also softens the background behind the workspace and includes the current interface screenshot.
 
 Start with the [user guide](USER-GUIDE.md), [private phone setup](PRIVATE-ACCESS-SETUP.md), [permission migration](PERMISSION-OVERRIDES.md) and [Activity startup](ACTIVITY-STARTUP.md). The [changelog](../CHANGELOG.md) retains the earlier release history.
 
-This update publishes source, assets, tests and documentation. It does not publish a new ZIP, signed installer or standalone desktop app. The app's packaged updater follows actual GitHub releases; source checkouts update through Git. The existing beta version in `package.json` is not a claim that a new downloadable release has been published.
+Download `seneschal-v0.2.1-beta.20.zip` from this release, extract it, and run `install.cmd` on a supported Windows PC. The ZIP contains the existing script-based installer, source, local assets, guides and tests. It requires WSL, Node.js and an existing OpenCode installation; it is not a standalone desktop executable or a signed native installer. Node 22.16+ is recommended for the complete feature set, including SQLite backups. Optional voice and integrations require their own supported access and setup.
+
+Older packaged installations can use **Settings → App updates** when the release is available. The update download must match GitHub's SHA-256 digest. Source checkouts update through Git. `SHA256SUMS.txt` accompanies the ZIP for independent verification.
+
+The full source suite passed 288 tests; the separate Phone Access verifier passed 207 synthetic checks. These do not replace actual Windows/WSL, microphone and phone testing on a new installation. Phone Access requires fresh qualification on the installed copy. See [validation scope](VALIDATION.md).
 
 Local credentials, histories, backups, browser profiles, development notes and model runtimes are excluded. Optional integrations still need their own setup and supported provider access. Finish active tasks before restarting an older host to load backend changes, then reload the browser pages.
 

@@ -8,7 +8,7 @@ Seneschal gives OpenCode a personal workspace on Windows and WSL: per-session mo
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
 
-**New here? Start with the [user guide](docs/USER-GUIDE.md).** It explains the controls, permission choices, voice, mascot, Activity, phone access and practical workflows in plain language. The November 1 source update is newer than the last packaged ZIP; this commit does not publish a new installer or release asset.
+**New here? Start with the [user guide](docs/USER-GUIDE.md).** It explains the controls, permission choices, voice, mascot, Activity, phone access and practical workflows in plain language. [Beta 20](https://github.com/Rammeshgar/seneschal/releases/tag/v0.2.1-beta.20) packages the current workspace for the existing Windows/WSL installer.
 
 ## What it is
 
@@ -147,7 +147,7 @@ npm start
 
 The server intentionally has no npm runtime dependencies.
 
-Use Node 22.16+ for the complete test suite, including SQLite fixtures. The November source refresh passed 288 source tests and 207 separate Phone Access checks in offline containers; see [validation scope](docs/VALIDATION.md).
+Use Node 22.16+ for the complete test suite, including SQLite fixtures. Beta 20 passed 288 source tests and 207 separate Phone Access checks in offline containers; see [validation scope](docs/VALIDATION.md).
 
 Phone Access has a separate offline verifier, `scripts/verify-private-access.ps1`, which requires Docker Desktop and an already-installed official Node image. Runtime state, keys, histories, backups and qualification proofs are local data and are never included in source releases. Optional browser and raster tests use separately installed tooling; see their usage headers.
 

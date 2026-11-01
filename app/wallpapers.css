@@ -1,8 +1,10 @@
 /* Local atmosphere collection — Seneschal's existing matte atelier tokens. */
-html[data-atmosphere-kind="pixel"][data-motion] .pixel-city { display: block; object-fit: cover; opacity: var(--atmosphere-strength, .78); filter: saturate(.83); animation: none; }
+/* Keep personal visibility controls; soften only the decorative workspace art.
+   The full-scene preview below retains its explicit, full-strength override. */
+html[data-atmosphere-kind="pixel"][data-motion] .pixel-city { display: block; object-fit: cover; opacity: calc(var(--atmosphere-strength, .78) * .82); filter: saturate(.83); animation: none; }
 html[data-atmosphere-kind="pixel"] .topology { display: none; }
 html[data-atmosphere-kind="pixel"] .conversation-panel::after { background: linear-gradient(180deg, color-mix(in srgb, var(--canvas) 15%, transparent), color-mix(in srgb, var(--canvas) 4%, transparent) 40%, color-mix(in srgb, var(--canvas) 54%, transparent)), radial-gradient(ellipse at center, transparent 30%, color-mix(in srgb, var(--canvas) 30%, transparent)); }
-html[data-atmosphere-kind="pixel"][data-motion][data-session-active="true"] .pixel-city { opacity: var(--atmosphere-conversation-strength, .18); filter: saturate(.45); }
+html[data-atmosphere-kind="pixel"][data-motion][data-session-active="true"] .pixel-city { opacity: calc(var(--atmosphere-conversation-strength, .18) * .75); filter: saturate(.45); }
 html[data-atmosphere-kind="pixel"][data-session-active="true"] .conversation-panel::after { background: color-mix(in srgb, var(--canvas) 68%, transparent); }
 html[data-atmosphere-kind="pixel"] .welcome { isolation: isolate; }
 html[data-atmosphere-kind="pixel"] .welcome::before { content: ""; position: absolute; z-index: -1; inset: 18% 7% 14%; left: 7%; top: 18%; width: auto; height: auto; transform: none; filter: none; background: radial-gradient(ellipse, color-mix(in srgb, var(--canvas) 84%, transparent), color-mix(in srgb, var(--canvas) 32%, transparent) 52%, transparent 74%); pointer-events: none; }
