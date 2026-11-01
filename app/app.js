@@ -77,6 +77,7 @@
 (() => {
   "use strict";
 
+  const confirm = message => window.confirm(window.SeneschalI18n?.t(message) || message);
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const storage = {
@@ -95,10 +96,13 @@
     models: [],
     agents: [],
     tools: [],
+    promptSubmissions: new Set(),
     mcp: {},
     messages: [],
     permissions: [],
+    permissionReplies: new Map(),
     collapsedMessageIDs: new Set(),
+    toolDetails: new Map(),
     pinnedMessages: storage.get("seneschal-pinned-messages", {}),
     archivedMessages: storage.get("seneschal-archived-messages", {}),
     deletedMessages: storage.get("seneschal-deleted-messages", {}),
@@ -140,6 +144,7 @@
     commandIndex: 0,
     userScrolledAway: false,
     refreshTimer: null,
+    refreshingWorkspace: false,
     speechRecognition: null,
     speechBaseText: "",
     mediaRecorder: null,
@@ -149,7 +154,10 @@
     conversationRecognition: null,
     conversationRestartTimer: null,
     voiceAwaitingResponse: false,
+    voiceTurn: null,
     voiceSpeaking: false,
+    voiceMicMuted: false,
+    voiceSpeakerMuted: false,
     lastSpokenMessageID: "",
     instructionData: null,
     instructionTab: "persona",
@@ -326,6 +334,7 @@
   async function api(path, options = {}) {
     const target = options.noDirectory ? path : withDirectory(path, options.directory);
     const init = { method: options.method || "GET", headers: { Accept: "application/json" } };
+    if (options.signal) init.signal = options.signal;
     if (options.body !== undefined) {
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(options.body);
@@ -333,7 +342,9 @@
     const response = await fetch(`/api${target}`, init);
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(detail || `${response.status} ${response.statusText}`);
+      const error = new Error(detail || `${response.status} ${response.statusText}`);
+      error.status = response.status;
+      throw error;
     }
     if (response.status === 204) return null;
     const type = response.headers.get("content-type") || "";
@@ -342,6 +353,7 @@
 
   async function workspace(path, options = {}) {
     const init = { method: options.method || "GET", headers: { Accept: "application/json" } };
+    if (options.signal) init.signal = options.signal;
     if (options.body !== undefined) {
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(options.body);
@@ -420,6 +432,26 @@
     $("span", els.connection).textContent = label;
   }
 
+  function setRecoveryStatus(kind) {
+    const messages = {
+      offline: "Offline. PC tasks may still be running. Reconnecting when your connection returns…",
+      reconnecting: "Reconnecting to the PC… Your messages will not be resent.",
+      syncing: "Connected. Catching up with the latest messages and task status…",
+      expired: document.body.classList.contains("remote-client") ? "Phone access expired or was revoked. Open the pairing page to reconnect." : "Access expired. Reopen Seneschal from its PC launcher."
+    };
+    const notice = $("#connectionRecoveryStatus");
+    if (notice) {
+      notice.textContent = messages[kind] || ""; notice.hidden = !notice.textContent;
+      if (kind === "expired" && document.body.classList.contains("remote-client")) {
+        const link = document.createElement("a"); link.href = "/remote/pair"; link.textContent = "Pair this browser";
+        notice.append(" ", link);
+      }
+    }
+    setConnection(kind === "live" ? "online" : kind === "expired" ? "error" : "", kind === "live" ? "Live" : kind === "offline" ? "Offline" : kind === "expired" ? "Sign in again" : "Reconnecting");
+    els.pulseLabel.textContent = kind === "live" ? "LIVE" : "RETRY";
+    updateConversationClearance();
+  }
+
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
     storage.set("atelier-theme", theme);
@@ -458,11 +490,84 @@
     syncPanelState();
   }
 
+  function revealRailSection(key) {
+    if (key !== "projects" && key !== "sessions") return;
+    state.leftPanelCollapsed = false;
+    state.railSections[key] = false;
+    storage.set("atelier-left-panel-collapsed", false);
+    storage.set("seneschal-rail-sections-v2", state.railSections);
+    syncPanelState(); syncRailSections();
+    const section = $(key === "projects" ? "#projectsRailSection" : "#sessionsRailSection");
+    if (section) {
+      section.tabIndex = -1;
+      section.setAttribute("aria-label", key === "projects" ? "Projects" : "Sessions");
+      section.scrollIntoView({ block: "nearest", inline: "nearest" });
+      section.focus({ preventScroll: true });
+    }
+  }
+
+  function revealInspectorSection(key) {
+    if (!["permissions", "tools", "providers", "pulse"].includes(key)) return;
+    const section = $('.inspector-block[data-inspector-section="' + key + '"]');
+    if (!section) return;
+    state.rightPanelCollapsed = false;
+    state.inspectorSections[key] = false;
+    storage.set("atelier-right-panel-collapsed", false);
+    storage.set("seneschal-inspector-sections", state.inspectorSections);
+    syncPanelState(); syncInspectorSections();
+    if (innerWidth <= 1120) els.inspector.classList.add("open");
+    section.tabIndex = -1;
+    section.setAttribute("aria-label", ({ permissions: "Permissions", tools: "Active tools", providers: "Providers", pulse: "Workspace pulse" })[key]);
+    section.scrollIntoView({ block: "nearest", inline: "nearest" });
+    section.focus({ preventScroll: true });
+  }
+
+  function syncCompactPermissionBadge(pending) {
+    const badge = $("#compactPermissionBadge"), button = $("#compactPermissions");
+    if (!badge || !button) return;
+    const count = (pending || state.permissions.filter(item => state.permissionReplies.get(item.id)?.status !== "resolved")).length;
+    const number = window.SeneschalI18n?.number(Math.min(count, 9)) || String(Math.min(count, 9));
+    badge.hidden = count === 0;
+    const label = number + (count > 9 ? "+" : "");
+    if (badge.textContent !== label) badge.textContent = label;
+    button.classList.toggle("has-pending", count > 0);
+    const status = $("#compactPermissionStatus");
+    const source = count ? "Permission required" : "No waiting approvals";
+    if (status) {
+      if (window.SeneschalI18n?.setText) window.SeneschalI18n.setText(status, source);
+      else if (status.textContent !== source) status.textContent = source;
+    }
+  }
+
+  function bindCompactNavigation() {
+    $("#settingsRailButton")?.setAttribute("aria-label", "Workspace settings");
+    $("#settingsRailButton")?.setAttribute("title", "Workspace settings");
+    $("#compactNewSession")?.addEventListener("click", () => newSession());
+    $("#compactProjects")?.addEventListener("click", () => revealRailSection("projects"));
+    $("#compactSessions")?.addEventListener("click", () => revealRailSection("sessions"));
+    $$("[data-context-section]").forEach(button => button.addEventListener("click", () => revealInspectorSection(button.dataset.contextSection)));
+    const leftMedia = matchMedia("(min-width: 681px)"), rightMedia = matchMedia("(min-width: 1121px)");
+    leftMedia.addEventListener("change", event => {
+      if (!event.matches && $(".compact-left-nav")?.contains(document.activeElement)) $("#homeButton")?.focus({ preventScroll: true });
+    });
+    rightMedia.addEventListener("change", event => {
+      if (!event.matches && $(".compact-context-nav")?.contains(document.activeElement)) $("#openInspectorButton")?.focus({ preventScroll: true });
+    });
+    window.addEventListener("seneschal:languagechange", () => syncCompactPermissionBadge());
+    syncCompactPermissionBadge();
+  }
+
   const motionPresets = {
     orbit: { short: "Orbit", label: "Orbit Drift" },
+    citylight: { short: "Citylight", label: "Citylight" },
     "pixel-city": { short: "City", label: "City Nocturne" },
     "lunar-relay": { short: "Lunar", label: "Lunar Relay" },
     "orbital-foundry": { short: "Foundry", label: "Orbital Foundry" },
+    "afterlight-city": { short: "Starlight", label: "Canal City" },
+    "afterlight-observatory": { short: "Northstar", label: "Northstar" },
+    "afterlight-sleeper": { short: "Sleeper", label: "The Last Sleeper" },
+    "afterlight-pelagic": { short: "Pelagic", label: "Pelagic Archive" },
+    "afterlight-sanctuary": { short: "Sanctuary", label: "Lantern Sanctuary" },
     still: { short: "Still", label: "Still composition" }
   };
 
@@ -473,7 +578,13 @@
     document.documentElement.dataset.motion = next;
     $("#motionLabel").textContent = motionPresets[next].short;
     $("#settingsMotion").textContent = motionPresets[next].label;
-    if (["pixel-city", "lunar-relay", "orbital-foundry"].includes(next)) drawPixelScene(performance.now());
+    if (window.SeneschalAtmosphere) window.SeneschalAtmosphere.select(next);
+    else if (["pixel-city", "lunar-relay", "orbital-foundry"].includes(next)) drawPixelScene(performance.now());
+  }
+
+  function openAtmospheres(event) {
+    if (window.SeneschalAtmosphere) window.SeneschalAtmosphere.open(event?.currentTarget || $("#settingsButton"));
+    else cycleMotion();
   }
 
   function cycleMotion() {
@@ -484,6 +595,7 @@
 
   function syncMotionState() {
     document.documentElement.dataset.motionPaused = document.hidden ? "true" : "false";
+    window.SeneschalAtmosphere?.sync();
   }
 
   function drawPixelCity(now) {
@@ -816,14 +928,17 @@
   function syncInspectorSections() {
     const keys = ["permissions", "tools", "browser", "creative", "code", "budget", "providers", "pulse"];
     $$(".inspector-block", els.inspector).forEach((section, index) => {
-      const key = keys[index] || `section-${index}`; section.dataset.inspectorSection = key;
+      const key = section.dataset.inspectorSection || keys[index] || `section-${index}`; section.dataset.inspectorSection = key;
       let button = $(".inspector-section-toggle", section);
       if (!button) {
         button = document.createElement("button"); button.type = "button"; button.className = "inspector-section-toggle"; button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';
         $(".block-title", section)?.append(button);
         button.addEventListener("click", () => { state.inspectorSections[key] = !state.inspectorSections[key]; storage.set("seneschal-inspector-sections", state.inspectorSections); syncInspectorSections(); });
       }
-      const collapsed = Boolean(state.inspectorSections[key]); section.classList.toggle("collapsed", collapsed); button.setAttribute("aria-expanded", String(!collapsed)); button.setAttribute("aria-label", `${collapsed ? "Expand" : "Minimize"} ${$(".block-title > span", section)?.textContent || "section"}`);
+      const content = [...section.children].filter(child => !child.classList.contains("block-title") && !child.classList.contains("pulse-summary"));
+      content.forEach((child, childIndex) => { if (!child.id) child.id = `inspector-${key}-details-${childIndex}`; });
+      button.setAttribute("aria-controls", content.map(child => child.id).join(" "));
+      const collapsed = state.inspectorSections[key] !== false; section.classList.toggle("collapsed", collapsed); button.setAttribute("aria-expanded", String(!collapsed)); button.setAttribute("aria-label", `${collapsed ? "Expand" : "Minimize"} ${$(".block-title > span", section)?.textContent || "section"}`);
     });
   }
 
@@ -902,9 +1017,11 @@
   }
 
   function mergePermissionSnapshot(latest = [], session = selectedSession()) {
+    latest = latest.filter(permission => state.permissionReplies?.get(permission.id)?.status !== "resolved");
     const latestByID = new Map(latest.map((permission) => [permission.id, permission]));
     const merged = [...latest];
     for (const permission of state.permissions) {
+      if (state.permissionReplies?.get(permission.id)?.status === "resolved") continue;
       if (latestByID.has(permission.id)) { state.permissionMisses[permission.id] = 0; continue; }
       const belongsHere = !session || !permission.sessionID || permission.sessionID === session.id;
       if (!belongsHere) { merged.push(permission); continue; }
@@ -999,42 +1116,28 @@
       bonsai: ["ternary-bonsai-27b"],
       deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"]
     };
-    const openAIModel = (id, name, family, cost, efforts) => ({
-      id,
-      providerID: "openai",
-      name,
-      family,
-      api: { id, npm: "@ai-sdk/openai", url: "" },
-      capabilities: { temperature: false, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: true, video: false, pdf: true }, output: { text: true, audio: false, image: false, video: false, pdf: false } },
-      cost,
-      limit: { context: 1050000, input: 922000, output: 128000 },
-      status: "active",
-      variants: Object.fromEntries(efforts.map((reasoningEffort) => [reasoningEffort, { reasoningEffort, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] }]))
-    });
-    const currentOpenAIModels = [
-      openAIModel("gpt-6-astra", "GPT-6 Astra", "gpt-astra", { input: 10, output: 50, cache: { read: 1, write: 12.5 } }, ["low", "medium", "high", "xhigh", "max"]),
-      openAIModel("gpt-6.1-sol", "GPT-6.1 Sol", "gpt-6.1", { input: 2, output: 10, cache: { read: .1, write: 2.5 } }, ["low", "medium", "high", "xhigh", "max"]),
-      openAIModel("gpt-6-sol", "GPT-6 Sol", "gpt-6", { input: 2, output: 10, cache: { read: .2, write: 2.5 } }, ["none", "low", "medium", "high", "xhigh", "max"]),
-      openAIModel("gpt-6-luna", "GPT-6 Luna", "gpt-6", { input: .1, output: .5, cache: { read: .01, write: .125 } }, ["none", "low", "medium", "high", "xhigh", "max"])
-    ];
+    // A published model is not necessarily registered in this running engine.
+    // Never manufacture selectable catalog entries or their capabilities/prices.
     const list = [];
     for (const provider of state.providers.all || []) {
       const configuredLocal = provider.id === "bonsai" && provider.source === "custom";
       if (connected.size && !connected.has(provider.id) && !configuredLocal) continue;
       const providerModels = Object.values(provider.models || {});
-      if (provider.id === "openai") currentOpenAIModels.forEach((model) => {
-        if (!providerModels.some((candidate) => candidate.id === model.id)) providerModels.push(model);
-      });
       for (const model of providerModels) {
-        if (curated[provider.id] && !curated[provider.id].includes(model.id)) continue;
+        // Prefer known OpenAI entries in sorting, but retain engine-reported fallbacks.
+        if (provider.id !== "openai" && curated[provider.id] && !curated[provider.id].includes(model.id)) continue;
         if (!(model.capabilities?.input?.text ?? true) || !(model.capabilities?.toolcall ?? model.tool_call ?? true)) continue;
         list.push({ ...model, providerID: model.providerID || provider.id, providerName: provider.name, value: `${model.providerID || provider.id}/${model.id}` });
       }
     }
     const providerOrder = ["openai", "bonsai", "google", "opencode", "deepseek"];
+    const preferredRank = (model) => {
+      const index = curated[model.providerID]?.indexOf(model.id) ?? -1;
+      return index >= 0 ? index : 99;
+    };
     return list.sort((a, b) => {
-      const pa = curated[a.providerID]?.indexOf(a.id) ?? 99;
-      const pb = curated[b.providerID]?.indexOf(b.id) ?? 99;
+      const pa = preferredRank(a);
+      const pb = preferredRank(b);
       return a.providerID === b.providerID ? pa - pb : providerOrder.indexOf(a.providerID) - providerOrder.indexOf(b.providerID);
     });
   }
@@ -1062,6 +1165,7 @@
 
   function renderModelPicker(query = els.modelSearch?.value || "") {
     const selected = selectedModel();
+    els.modelPickerLabel.dataset.modelName = String(Boolean(selected?.name));
     els.modelPickerLabel.textContent = selected?.name || "Select model";
     const needle = query.trim().toLowerCase();
     const groups = new Map();
@@ -1080,6 +1184,99 @@
   function closeModelPicker() {
     els.modelPickerMenu.hidden = true;
     els.modelPickerButton.setAttribute("aria-expanded", "false");
+  }
+
+  function bindAresAvailability() {
+    const explain = () => {
+      if (window.SeneschalAres) return;
+      const feedback = $('#aresAvailability');
+      if (feedback) { feedback.textContent = 'Seneschal is not loaded by this Seneschal host. Finish active tasks, restart Seneschal only, then reload this page.'; feedback.hidden = false; }
+      const checkbox = $('#aresEnabled'); if (checkbox) checkbox.checked = false;
+    };
+    $('#aresToggle')?.addEventListener('click', explain);
+    $('#aresEnabled')?.addEventListener('change', explain);
+  }
+
+  function bindComposerOptions() {
+    const options = $("#composerOptions"), summary = $("#composerOptionsSummary"), media = matchMedia("(max-width: 680px)");
+    const close = (restoreFocus = false) => {
+      options.open = false;
+      if (restoreFocus) summary.focus({ preventScroll: true });
+    };
+    const position = () => {
+      const panel = $("#composerOptionsPanel"), rect = options.getBoundingClientRect(), trigger = summary.getBoundingClientRect();
+      const width = Math.min(300, innerWidth - 32);
+      panel.style.width = `${width}px`;
+      panel.style.left = `${Math.max(8, Math.min(trigger.left, innerWidth - width - 8)) - rect.left}px`;
+      panel.style.maxHeight = `${Math.max(80, Math.min(280, trigger.top - 16))}px`;
+    };
+    const sync = () => {
+      const hadFocus = options.contains(document.activeElement);
+      close(hadFocus);
+      updateConversationClearance();
+    };
+    summary.addEventListener("click", () => { if (!options.open) position(); });
+    options.addEventListener("toggle", () => { if (options.open) position(); updateConversationClearance(); });
+    options.addEventListener("keydown", event => {
+      if (event.key === "Escape" && options.open && !$("dialog[open]") && !$("#voiceOptionsPanel").matches(":popover-open")) {
+        event.preventDefault(); event.stopPropagation(); close(true);
+      }
+    });
+    document.addEventListener("click", event => {
+      if (options.open && !options.contains(event.target) && !event.target.closest("dialog")) close();
+    });
+    $("#attachFilesButton").addEventListener("click", () => els.fileInput.click());
+    media.addEventListener("change", sync);
+    window.addEventListener("resize", () => { if (options.open) position(); });
+    sync();
+  }
+
+  function bindModelPicker() {
+    els.modelPickerButton.addEventListener("click", () => {
+      const opening = els.modelPickerMenu.hidden;
+      els.modelPickerMenu.hidden = !opening;
+      els.modelPickerButton.setAttribute("aria-expanded", String(opening));
+      if (opening) {
+        if (innerWidth <= 1120) els.inspector.classList.remove("open");
+        els.modelSearch.value = ""; renderModelPicker();
+        requestAnimationFrame(() => { if (!els.modelPickerMenu.hidden) els.modelSearch.focus({ preventScroll: true }); });
+      }
+    });
+    $("#closeModelPickerButton").addEventListener("click", () => { closeModelPicker(); els.modelPickerButton.focus(); });
+    els.modelSearch.addEventListener("input", () => renderModelPicker(els.modelSearch.value));
+    els.modelPickerGroups.addEventListener("click", (event) => { const option = event.target.closest("[data-model-value]"); if (option) { selectModel(option.dataset.modelValue); els.modelPickerButton.focus(); } });
+    document.addEventListener("click", (event) => { if (!els.modelPicker.contains(event.target)) closeModelPicker(); });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !els.modelPickerMenu.hidden) { closeModelPicker(); els.modelPickerButton.focus(); } });
+  }
+
+  function bindContextDrawer() {
+    const trigger = $("#openInspectorButton"), close = $("#closeInspectorButton"), media = matchMedia("(max-width: 1120px)");
+    let wasOpen = false;
+    const sync = () => {
+      // The remote client installs its own drawer focus/navigation controller.
+      if (document.body.classList.contains("remote-client")) return;
+      const open = media.matches && els.inspector.classList.contains("open");
+      const hadFocus = els.inspector.contains(document.activeElement);
+      els.inspector.inert = media.matches && !open;
+      trigger.hidden = open;
+      trigger.setAttribute("aria-controls", els.inspector.id);
+      trigger.setAttribute("aria-expanded", String(open));
+      if (open && !wasOpen) close.focus({ preventScroll: true });
+      if (!open && wasOpen && hadFocus && media.matches) trigger.focus({ preventScroll: true });
+      wasOpen = open;
+    };
+    trigger.addEventListener("click", () => { closeModelPicker(); $(".sidebar").classList.remove("open"); els.inspector.classList.add("open"); sync(); });
+    close.addEventListener("click", () => { els.inspector.classList.remove("open"); sync(); });
+    document.addEventListener("click", event => {
+      if (!media.matches || document.body.classList.contains("remote-client") || !els.inspector.classList.contains("open") || event.target.closest("dialog")) return;
+      if (!els.inspector.contains(event.target) && !trigger.contains(event.target)) { els.inspector.classList.remove("open"); sync(); }
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && media.matches && !document.body.classList.contains("remote-client") && !document.querySelector("dialog[open]")) { els.inspector.classList.remove("open"); sync(); }
+    });
+    media.addEventListener("change", () => { if (!media.matches) els.inspector.classList.remove("open"); sync(); });
+    new MutationObserver(sync).observe(els.inspector, { attributes: true, attributeFilter: ["class"] });
+    sync();
   }
 
   function selectModel(value) {
@@ -1369,6 +1566,7 @@
     $("#agentBoardPauseButton").textContent = board.paused ? "Resume queue" : "Pause queue";
     $("#agentBoardStopButton").disabled = !counts.running;
     $$('[data-board-open]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => openBoardSession(button.dataset.boardOpen)));
+    $$('[data-board-activity]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", event => window.SeneschalActivity?.openSession(button.dataset.boardActivity, event.currentTarget)));
     $$('[data-board-run]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => runBoardAgent(button.dataset.boardRun, true)));
     $$('[data-board-edit]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => openAgentEditor(button.dataset.boardEdit)));
     $$('[data-board-delete]', els.agentBoardColumns).forEach((button) => button.addEventListener("click", () => deleteBoardAgent(button.dataset.boardDelete)));
@@ -1379,7 +1577,7 @@
     const dependencyNames = agent.dependencies.map((id) => boardAgent(id)?.name).filter(Boolean);
     const columnStatus = boardColumnStatus(agent);
     const sessionStatusText = agent.status === "failed" ? "Failed" : agent.status === "complete" ? "Complete" : columnStatus === "waiting" ? "Waiting" : agent.status === "running" ? "Working" : "Ready";
-    const sessionButton = agent.sessionID ? `<button type="button" data-board-open="${escapeHTML(agent.id)}">Open session</button>` : "";
+    const sessionButton = agent.sessionID ? `<button type="button" data-board-open="${escapeHTML(agent.id)}">Open session</button><button type="button" data-board-activity="${escapeHTML(agent.sessionID)}">Activity</button>` : "";
     const runButton = agent.imported ? "" : `<button type="button" data-board-run="${escapeHTML(agent.id)}"${agent.status === "running" || columnStatus === "waiting" ? " disabled" : ""}>${["complete", "failed"].includes(agent.status) ? "Run again" : "Run"}</button>`;
     const stopButton = agent.status === "running" ? `<button type="button" class="board-stop-button" data-board-stop="${escapeHTML(agent.id)}">Stop</button>` : "";
     const activity = agent.activity ? `<div class="board-agent-activity"><strong>${escapeHTML(agent.activityType || "Live activity")}</strong><span title="${escapeHTML(agent.activity)}">${escapeHTML(agent.activity)}</span></div>` : "";
@@ -1597,8 +1795,8 @@
       state.agentBoard.architectSessionID = architect.id;
       const catalog = state.models.slice(0, 40).map((item) => ({ value: item.value, name: item.name, provider: item.providerName }));
       const prompt = `You are Seneschal's Board Architect. Read only the plan below and design the smallest effective multi-agent workflow for it. Independent work should run in parallel. Include exactly one supervisor who owns acceptance and can request rework. Give each agent one concrete role, task, system access, and dependencies. Use 2-8 agents. Access must be observe, read, browser, or build. Roles must be plan, build, review, or supervisor. Keys must be unique and dependsOn may reference only agents listed earlier. Choose model values only from the supplied catalog; otherwise omit model. Return JSON only, with this shape: {"title":"...","objective":"...","concurrency":3,"agents":[{"key":"unique-key","name":"...","role":"plan","access":"read","model":"optional catalog value","task":"...","dependsOn":["earlier-key"]}]}.\n\n# Available models\n${JSON.stringify(catalog)}\n\n# Selected plan\n${planText.slice(0, 50000)}`;
-      const tools = Object.fromEntries([...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"])].map((tool) => [tool, false]));
-      await api(`/session/${encodeURIComponent(architect.id)}/prompt_async`, { directory: origin.directory, method: "POST", body: { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools, agent: "plan", parts: [{ type: "text", text: prompt }] } });
+      const tools = promptToolRestrictions("observe");
+      await submitSessionInput(architect.id, origin.directory, { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools, agent: "plan", parts: [{ type: "text", text: prompt }] });
       const design = parseBoardArchitecture(await waitForArchitectResult(architect.id, origin.directory));
       state.agentBoard = boardFromArchitecture(design, planText, messageID, origin.id, architect.id, origin.directory);
       state.agentBoard = normalizeAgentBoard(await workspace("/workspace/agent-board", { method: "POST", body: state.agentBoard }));
@@ -1695,16 +1893,9 @@
       const text = await boardPrompt(agent);
       if (agent.status !== "running") return false;
       const requestAgent = agent.access === "build" ? "build" : "plan";
-      const availableTools = [...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"].filter((tool) => tool && tool !== "invalid"))];
-      const allowed = {
-        observe: () => false,
-        read: (tool) => /^(read|glob|grep)$/.test(tool),
-        browser: (tool) => /^(read|glob|grep|webfetch|websearch)$/.test(tool) || /^playwright_/.test(tool),
-        build: () => true
-      }[agent.access] || ((tool) => /^(read|glob|grep)$/.test(tool));
-      const toolOverrides = Object.fromEntries(availableTools.map((tool) => [tool, allowed(tool)]));
+      const toolOverrides = promptToolRestrictions(agent.access);
       state.statuses[agent.sessionID] = { type: "busy" };
-      await api(`/session/${encodeURIComponent(agent.sessionID)}/prompt_async`, { directory, method: "POST", body: { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools: toolOverrides, agent: requestAgent, parts: [{ type: "text", text }] } });
+      await submitSessionInput(agent.sessionID, directory, { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools: toolOverrides, agent: requestAgent, parts: [{ type: "text", text }] });
       (agent.inbox || []).forEach((item) => { item.delivered = true; });
       agent.activity = "Prompt accepted. Waiting for the first model step…"; agent.activityType = "Working"; agent.activityAt = Date.now();
       scheduleAgentBoardSave(); renderSessions(); renderAgentBoard();
@@ -1858,11 +2049,41 @@
     } catch (error) { toast(`Could not open Blender: ${error.message}`, "error"); }
   }
 
+  let backupRequestPending = false, backupStatusTimer = null, backupStatusChecking = false, backupStatusSerial = 0;
+  function renderBackupStatus(value) {
+    const remote = document.body.classList.contains('remote-client');
+    const busy = backupRequestPending || value?.phase === 'running';
+    $("#backupStatus").textContent = remote ? 'Create and manage private backups on your PC. This phone cannot start or download backups.' : value?.message || 'No verified backup recorded.';
+    $("#backupStatus").setAttribute('aria-busy', String(busy || backupStatusChecking));
+    for (const selector of ['#backupNowButton', '#settingsBackupsButton']) $(selector).disabled = remote || busy || backupStatusChecking;
+    $("#backupNowButton").textContent = busy ? 'Creating backup…' : 'Back up now';
+    $("#backupStatusButton").disabled = remote || backupStatusChecking;
+    $("#backupStatusButton").textContent = backupStatusChecking ? 'Checking…' : 'Check backup status';
+    clearTimeout(backupStatusTimer);
+    if (!remote && value?.phase === 'running' && els.settingsDialog.open) backupStatusTimer = setTimeout(refreshBackupStatus, 2000);
+  }
+  async function refreshBackupStatus() {
+    if (document.body.classList.contains('remote-client')) { renderBackupStatus(); return; }
+    const serial = ++backupStatusSerial;
+    backupStatusChecking = true;
+    renderBackupStatus({ phase: backupRequestPending ? 'running' : 'checking', message: 'Checking backup status…' });
+    let value;
+    try { value = await workspace('/workspace/backup/status', { signal: AbortSignal.timeout(12000) }); }
+    catch { value = { message: 'Backup status is unavailable. Use Check backup status before starting another backup. No success has been confirmed.' }; }
+    if (serial !== backupStatusSerial) return;
+    backupStatusChecking = false;
+    renderBackupStatus({ ...value, message: `${value.message} Last checked ${new Date().toLocaleTimeString()}.` });
+  }
   async function backupNow() {
+    if (backupRequestPending || document.body.classList.contains('remote-client')) return;
+    ++backupStatusSerial; backupStatusChecking = false;
+    backupRequestPending = true;
+    renderBackupStatus({ phase: 'running', message: 'Starting a private backup…' });
     try {
-      await workspace("/workspace/backup", { method: "POST" });
-      toast("Sanitized backup started. It will appear in Documents shortly.");
-    } catch (error) { toast(`Could not start the backup: ${error.message}`, "error"); }
+      await workspace('/workspace/backup', { method: 'POST', body: {}, signal: AbortSignal.timeout(12000) });
+    } catch {
+      // Lost responses never automatically re-submit the backup request.
+    } finally { backupRequestPending = false; await refreshBackupStatus(); }
   }
 
   function instructionEndpoint() {
@@ -2046,7 +2267,7 @@
   }
 
   function closeInstructionStudio() {
-    if (state.instructionsDirty && !window.confirm("Close without saving your latest instruction edits?")) return;
+    if (state.instructionsDirty && !confirm("Close without saving your latest instruction edits?")) return;
     state.instructionsDirty = false;
     els.instructionDialog.close();
   }
@@ -2225,7 +2446,11 @@
     const status = part.state?.status || "pending";
     const title = part.state?.title || part.tool || "Tool";
     const output = part.state?.output || part.state?.error || "";
-    return `<section class="tool-part ${escapeHTML(status)}"><header><strong>${escapeHTML(part.tool || "tool")}</strong><span>${escapeHTML(title)}</span><span class="tool-status">${escapeHTML(status)}</span></header>${output ? `<pre>${escapeHTML(output)}</pre>` : ""}</section>`;
+    const key = part.id || `${part.tool || "tool"}:${title}`;
+    const remembered = state.toolDetails?.get(key);
+    const toolName = String(part.tool || "tool").toLowerCase();
+    const expanded = typeof remembered === "boolean" ? remembered : status !== "completed" || (innerWidth > 680 && toolName !== "bash");
+    return `<details class="tool-part ${escapeHTML(status)}" data-tool-key="${escapeHTML(key)}" data-tool-name="${escapeHTML(toolName)}"${expanded ? " open" : ""}><summary class="tool-summary"><strong>${escapeHTML(part.tool || "tool")}</strong><span class="tool-status">${escapeHTML(status)}</span><span class="tool-chevron" aria-hidden="true">⌄</span></summary><div class="tool-detail-title">${escapeHTML(title)}</div>${output ? `<pre tabindex="0" aria-label="${escapeHTML(part.tool || "Tool")} output">${escapeHTML(output)}</pre>` : ""}</details>`;
   }
 
   function renderPart(part) {
@@ -2352,6 +2577,33 @@
     syncRailSections();
   }
 
+  function bindToolDisclosures() {
+    state.toolDetails ||= new Map();
+    const media = matchMedia("(max-width: 680px)");
+    els.messageList.addEventListener("click", event => {
+      const summary = event.target.closest(".tool-summary");
+      if (!summary || !els.messageList.contains(summary)) return;
+      const tool = summary.parentElement;
+      state.toolDetails.set(tool.dataset.toolKey, !tool.open);
+      if (state.toolDetails.size > 256) state.toolDetails.delete(state.toolDetails.keys().next().value);
+    });
+    media.addEventListener("change", () => $$(".tool-part[data-tool-key]", els.messageList).forEach(tool => {
+      const remembered = state.toolDetails.get(tool.dataset.toolKey);
+      tool.open = typeof remembered === "boolean" ? remembered : !tool.classList.contains("completed") || (!media.matches && tool.dataset.toolName !== "bash");
+    }));
+  }
+
+  function bindMessageActionMenus() {
+    const media = matchMedia("(max-width: 680px)");
+    media.addEventListener("change", () => $$(".message-actions-menu", els.messageList).forEach(menu => { menu.open = !media.matches; }));
+    els.messageList.addEventListener("keydown", event => {
+      const menu = event.target.closest(".message-actions-menu[open]");
+      if (event.key === "Escape" && media.matches && menu) {
+        event.preventDefault(); menu.open = false; $("summary", menu).focus({ preventScroll: true });
+      }
+    });
+  }
+
   function renderMessages(scroll = false) {
     const session = selectedSession();
     const hasSession = Boolean(session);
@@ -2394,7 +2646,8 @@
       const controls = `<span class="message-view-controls">${userActions}${boardAction}<button type="button" class="message-pin-button${isPinned ? " active" : ""}" aria-label="${isPinned ? "Unpin" : "Pin"} this message" title="${isPinned ? "Unpin" : "Pin"} this message">${isPinned ? "Unpin" : "Pin"}</button><button type="button" class="message-archive-button" aria-label="${isArchived ? "Restore" : "Archive"} this message" title="${isArchived ? "Restore" : "Archive"} this message locally">${isArchived ? "Restore" : "Archive"}</button><button type="button" class="message-delete-button" aria-label="Delete this message" title="Delete from this Seneschal view">Delete</button><button type="button" class="message-size-button" aria-label="Minimize ${kind}" title="Minimize or expand ${kind}">Minimize</button><button type="button" class="message-maximize-button" aria-label="Maximize ${kind}" title="Maximize ${kind}">Maximize</button><button type="button" class="message-copy-button" aria-label="Copy ${kind}" title="Copy ${kind}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span></button></span>`;
       const collapsed = state.collapsedMessageIDs.has(info.id) ? " collapsed" : "";
       const maximized = state.maximizedMessageID === info.id ? " maximized" : "";
-      return `<article class="message ${role}${isPinned ? " pinned" : ""}${isArchived ? " archived" : ""}${collapsed}${maximized}" data-message="${escapeHTML(info.id || "")}"><div class="message-avatar">${avatar}</div><div class="message-body"><div class="message-meta"><strong>${escapeHTML(label)}</strong><span>${info.time?.created ? new Date(info.time.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>${controls}</div><div class="message-content">${parts}</div></div></article>`;
+      const actionMenu = `<details class="message-actions-menu"${innerWidth > 680 ? " open" : ""}><summary aria-label="Actions for this ${role === "user" ? "message" : "response"}">Actions</summary>${controls}</details>`;
+      return `<article class="message ${role}${isPinned ? " pinned" : ""}${isArchived ? " archived" : ""}${collapsed}${maximized}" data-message="${escapeHTML(info.id || "")}"><div class="message-avatar">${avatar}</div><div class="message-body"><div class="message-meta"><strong>${escapeHTML(label)}</strong><span>${info.time?.created ? new Date(info.time.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>${actionMenu}</div><div class="message-content">${parts}</div></div></article>`;
     }).join("");
     const busy = sessionStatus(session.id) === "busy";
     const liveActivity = busy ? escapeHTML(liveActivityText()) : "";
@@ -2489,8 +2742,27 @@
 
   function updateConversationClearance() {
     if (!els.form || !els.messageScroll) return;
-    const height = els.form.getBoundingClientRect().height;
-    els.messageScroll.style.setProperty("--composer-clearance", `${Math.ceil(height + 34)}px`);
+    const footer = $('.composer-footer', els.form), topline = $('.composer-topline', els.form);
+    const controls = (footer?.offsetHeight || 0) + (topline?.offsetHeight || 0);
+    const compact = innerHeight <= 500 || els.form.classList.contains('minimized');
+    const minimum = `${Math.ceil(controls + (compact ? 20 : 56))}px`;
+    if (els.form.style.getPropertyValue('--composer-min-height') !== minimum) els.form.style.setProperty('--composer-min-height', minimum);
+    // The composer and notices now reserve their own space in normal flow.
+    els.messageScroll.style.setProperty("--composer-clearance", "12px");
+  }
+
+  function bindConversationLayout() {
+    let scheduled = false;
+    const update = () => {
+      if (scheduled) return; scheduled = true;
+      requestAnimationFrame(() => { scheduled = false; updateConversationClearance(); });
+    };
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(update);
+      for (const node of [els.form, $('.composer-footer', els.form), $('.composer-topline', els.form)]) if (node) observer.observe(node);
+    }
+    window.addEventListener('resize', update); window.visualViewport?.addEventListener('resize', update);
+    update();
   }
 
   function syncMessageMaximizeControl(message, maximized) {
@@ -2607,17 +2879,38 @@
   }
 
   function renderComposer() {
-    els.composerProject.textContent = workingDirectory() ? `Project: ${basename(workingDirectory())}` : "No project selected";
+    if (workingDirectory()) {
+      const name = document.createElement('bdi'); name.dataset.noI18n = ''; name.textContent = basename(workingDirectory());
+      els.composerProject.replaceChildren(document.createTextNode('Project: '), name);
+    } else els.composerProject.textContent = 'No project selected';
     els.send.disabled = !state.currentDirectory || !state.models.length;
   }
 
   function renderPermissions() {
-    const permission = state.permissions.find((item) => !state.currentSessionID || item.sessionID === state.currentSessionID) || state.permissions[0];
+    const hadFocus = els.permissionDock.contains(document.activeElement);
+    const pending = state.permissions.filter(item => state.permissionReplies.get(item.id)?.status !== "resolved");
+    if (typeof syncCompactPermissionBadge === "function") syncCompactPermissionBadge(pending);
+    const permission = pending.find((item) => !state.currentSessionID || item.sessionID === state.currentSessionID) || pending[0];
     els.permissionDock.hidden = !permission;
-    if (!permission) return;
-    const pattern = Array.isArray(permission.pattern) ? permission.pattern.join(", ") : permission.pattern || permission.title || permission.type;
-    els.permissionDock.innerHTML = `<div class="permission-content"><div><span class="eyebrow">APPROVAL REQUIRED</span><h3>${escapeHTML(permission.title || permission.type || "OpenCode action")}</h3><p>${escapeHTML(pattern)}. Approve once, remember for this session, or reject.</p></div><div class="permission-actions"><button class="reject" data-reply="reject">Reject</button><button data-reply="always">Always</button><button class="allow" data-reply="once">Allow once</button></div></div>`;
+    if (!permission) { if (hadFocus) els.prompt.focus({ preventScroll: true }); return; }
+    const options = $('#composerOptions'), voiceOptions = $('#voiceOptionsPanel');
+    if (options) options.open = false;
+    if (voiceOptions?.matches(':popover-open')) voiceOptions.hidePopover();
+    const patterns = permission.patterns || permission.pattern;
+    const pattern = Array.isArray(patterns) ? patterns.join("\n") : patterns || permission.title || "";
+    const title = permission.title || permission.permission || permission.type || "Tool action";
+    const action = state.permissionReplies.get(permission.id);
+    const locked = action?.status === "pending" || action?.status === "uncertain";
+    const busy = action?.status === "pending" || Boolean(action?.checking);
+    const message = action?.status === "pending" ? "Sending your decision…" : action?.checking ? "Checking approval status… No decision is being sent." : action?.status === "uncertain" ? (action.message || "Could not confirm your reply. Nothing was resent. Check status before trying again.") : "Choose a decision. No action is approved automatically.";
+    els.permissionDock.innerHTML = `<div class="permission-content"><div class="permission-copy"><span class="permission-kicker"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="M12 8v5m0 3h.01"/></svg>Permission required${pending.length > 1 ? ` · ${pending.length} waiting` : ""}</span><h3>${escapeHTML(title)}</h3>${pattern ? `<pre class="permission-pattern" tabindex="0" aria-label="Requested action">${escapeHTML(pattern)}</pre>` : ""}<p>Review this action before it can continue.</p><p id="permissionReplyStatus" role="status" aria-live="polite" aria-atomic="true">${escapeHTML(message)}</p></div><div class="permission-actions" aria-busy="${busy}"><button type="button" class="reject" data-reply="reject" aria-describedby="permissionReplyStatus"${locked ? " disabled" : ""}>Reject</button><button type="button" data-reply="always" title="Remember this approval for this session" aria-describedby="permissionReplyStatus"${locked ? " disabled" : ""}>Always</button><button type="button" class="allow" data-reply="once" aria-describedby="permissionReplyStatus"${locked ? " disabled" : ""}>Allow once</button>${action?.status === "uncertain" ? `<button type="button" data-check-permission aria-describedby="permissionReplyStatus"${busy ? " disabled" : ""}>Check status</button>` : ""}</div></div>`;
     $$('[data-reply]', els.permissionDock).forEach((button) => button.addEventListener("click", () => replyPermission(permission, button.dataset.reply)));
+    $('[data-check-permission]', els.permissionDock)?.addEventListener("click", () => checkPermissionReply(permission));
+    if (hadFocus) {
+      const target = $('[data-check-permission]:not(:disabled), [data-reply="once"]:not(:disabled)', els.permissionDock) || $('#permissionReplyStatus', els.permissionDock);
+      if (target.id === "permissionReplyStatus") target.tabIndex = -1;
+      target.focus({ preventScroll: true });
+    }
   }
 
   function renderAll() {
@@ -2630,6 +2923,9 @@
     }
     els.resumeFollow.hidden = !state.currentSessionID;
     window.dispatchEvent(new CustomEvent('seneschal-session-selected', { detail: state.currentSessionID }));
+    window.dispatchEvent(new CustomEvent('seneschal-question-context', { detail: {
+      sessionID: state.currentSessionID, directory: selectedSession()?.directory || state.currentDirectory
+    } }));
     renderProjects(); renderSessions(); renderModels(); renderAgents(); renderInspector(); renderHeader(); renderUsage(); renderMessages(); renderComposer(); renderPermissions(); renderAgentBoard(); renderVsCode();
   }
 
@@ -2697,6 +2993,7 @@
 
   async function selectSession(id) {
     if (!id || id === state.currentSessionID) return;
+    if (state.conversationMode) stopConversationMode(false);
     const previous = selectedSession();
     const previousStillRunning = previous && ["busy", "retry"].includes(sessionStatus(previous.id));
     state.currentSessionID = id;
@@ -2733,8 +3030,95 @@
     } catch (error) { toast(`Could not create a session: ${error.message}`, "error"); return null; }
   }
 
+  function promptToolRestrictions(access) {
+    if (access === "build" || access === "plan") return undefined;
+    if (access === "chat" || access === "observe") return { "*": false };
+    const available = [...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"].filter(tool => tool && tool !== "invalid"))];
+    const permitted = access === "browser"
+      ? tool => /^(read|glob|grep|webfetch|websearch)$/.test(tool) || /^(playwright_|seneschal_moli_)/.test(tool)
+      : tool => /^(read|glob|grep)$/.test(tool);
+    // Legacy `tools: true` is an approval, not just tool availability.
+    // Leave permitted tools out so their configured ask/deny rules still apply.
+    return Object.fromEntries(available.filter(tool => !permitted(tool)).map(tool => [tool, false]));
+  }
+
+  function generatedToolRules(rules) {
+    if (!Array.isArray(rules) || !rules.length || rules.some(rule => !rule || rule.pattern !== "*" || !["allow", "deny"].includes(rule.action) || typeof rule.permission !== "string")) return false;
+    const names = new Set(rules.map(rule => rule.permission));
+    if (names.size !== rules.length) return false;
+    return rules.every(rule => rule.action === "deny") || ["read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"].every(name => names.has(name));
+  }
+
+  function sameToolRules(first, second) {
+    // Rule order matters in the engine; never reorder custom permission rules.
+    return JSON.stringify(first) === JSON.stringify(second);
+  }
+
+  function setPromptDeliveryStatus(message = "") {
+    const status = $("#promptDeliveryStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.hidden = !message;
+    updateConversationClearance();
+  }
+
+  async function submitSessionInput(sessionID, directory, body, onReady = () => {}, route = "prompt_async") {
+    if (state.promptSubmissions.has(sessionID)) throw new Error("This conversation is already submitting a request. Wait before sending again.");
+    if (Object.values(body.tools || {}).some(value => value !== false)) throw new Error("Tool approvals cannot be granted by a prompt.");
+    state.promptSubmissions.add(sessionID);
+    const endpoint = `/session/${encodeURIComponent(sessionID)}`;
+    const options = { directory };
+    async function request(route, input = options) {
+      // Only network time is bounded. Reading a native confirmation is not a
+      // network operation and must not expire the next request's signal.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      try { return await api(route, { ...input, signal: controller.signal }); }
+      catch (error) {
+        if (error.name === "AbortError") throw new Error("The PC did not respond in time. Check this conversation before trying again.");
+        throw error;
+      } finally { clearTimeout(timer); }
+    }
+    try {
+      const session = await request(endpoint);
+      const current = session.permission ?? [];
+      if (!Array.isArray(current)) throw new Error("Conversation permissions could not be checked. Nothing was sent.");
+      const desired = Object.entries(body.tools || {}).map(([permission]) => ({ permission, action: "deny", pattern: "*" }));
+      const inheritMarker = "__seneschal_inherit_policy__";
+      const alreadyInheriting = !desired.length && current.length === 1 && current[0].permission === inheritMarker && current[0].action === "deny" && current[0].pattern === "*";
+      if (current.length && !alreadyInheriting && !sameToolRules(current, desired)) {
+        if (generatedToolRules(current)) {
+          if (route !== "prompt_async") throw new Error("Send a normal message to restore this conversation's tool permissions before running a command, or use a new session. Nothing was sent.");
+          const notice = "This conversation has saved tool overrides from an earlier request. Use the configured permission policy for this message instead? This replaces its earlier tool overrides when the message is submitted, keeps its messages and files, and does not change other conversations. Cancel sends nothing.";
+          const agreed = window.confirm(window.SeneschalI18n?.t(notice) || notice);
+          if (!agreed) throw new Error("Nothing was sent. Start a new session or restore this conversation's tool permissions when ready.");
+          const latest = await request(endpoint);
+          const statuses = await request("/session/status");
+          if (!sameToolRules(latest.permission ?? [], current) || !statuses || typeof statuses !== "object" || Array.isArray(statuses) || (statuses[sessionID] && statuses[sessionID].type !== "idle")) throw new Error("The conversation changed or is still running. Nothing was reset or sent; check it before retrying.");
+          const health = await request("/global/health", { noDirectory: true });
+          if (health?.healthy !== true || health.version !== "1.19.0") throw new Error("Permission replacement is not verified for this engine version. Use a new session; nothing was sent.");
+          if (state.tools.includes(inheritMarker)) throw new Error("The reserved permission marker conflicts with an installed tool. Use a new session; nothing was sent.");
+          // 1.19 PATCH merges rules: [] does NOT clear old grants. Prompt tools
+          // replace the session rules before its execution loop. A deny for a
+          // reserved, nonexistent tool clears old grants without granting any
+          // actual tool permission or freezing a copy of today's agent policy.
+          body = { ...body, tools: desired.length ? body.tools : { [inheritMarker]: false } };
+        } else if (desired.length) {
+          throw new Error("This conversation has custom permission rules. Use a new session for restricted tool mode so those rules are not overwritten.");
+        }
+      }
+      onReady();
+      // No retries: an uncertain response must never submit the prompt twice.
+      try { return await request(`${endpoint}/${route}`, { ...options, method: "POST", body }); }
+      catch (error) { error.inputMayHaveReachedEngine = true; throw error; }
+    } finally {
+      state.promptSubmissions.delete(sessionID);
+    }
+  }
+
   async function sendPrompt(text, options = {}) {
-    if (state.mediaRecorder) { toast("Click Mic to finish the voice recording before sending.", "warn"); return; }
+    if (!options.voice && state.voiceTurn) stopConversationMode(false);
+    if (state.mediaRecorder) { toast("Finish the recording under Voice before sending.", "warn"); return; }
     let clean = text.trim();
     if (!clean && !state.attachments.length) return;
     if (!state.attachments.length && /^\/chatgpt\s*$/i.test(clean)) {
@@ -2793,36 +3177,42 @@
       return { type: "file", mime: type, filename: name, url: data };
     })];
     if (clean) parts.push({ type: "text", text: clean });
-    const optimistic = { info: { id: `local-${Date.now()}`, role: "user", time: { created: Date.now() } }, parts };
-    state.messages.push(optimistic);
-    state.userScrolledAway = false;
-    state.statuses[session.id] = { type: "busy" };
-    els.prompt.value = "";
-    state.attachments = [];
-    renderAttachments(); renderHeader(); renderMessages(true);
-    autoSizePrompt();
-    updateConversationClearance();
-    if (window.ResizeObserver && !state.composerObserver) { state.composerObserver = new ResizeObserver(updateConversationClearance); state.composerObserver.observe(els.form); }
+    const voiceMessageID = options.voice ? nextVoiceMessageID() : undefined;
+    const optimistic = { info: { id: voiceMessageID || `local-${Date.now()}`, role: "user", time: { created: Date.now() } }, parts };
+    const pendingAttachments = [...state.attachments];
+    setPromptDeliveryStatus();
     try {
-      const chatOnly = state.selectedAgent === "chat";
-      const availableTools = [...new Set([...state.tools, "read", "write", "edit", "bash", "task", "webfetch", "websearch", "glob", "grep"].filter((tool) => tool && tool !== "invalid"))];
-      const toolOverrides = Object.fromEntries(availableTools.map((tool) => [tool, !chatOnly]));
+      const toolOverrides = promptToolRestrictions(state.selectedAgent === "chat" ? "chat" : "build");
       const requestAgent = state.selectedAgent === "chat" ? "build" : state.selectedAgent;
-      await api(`/session/${encodeURIComponent(session.id)}/prompt_async`, {
-        directory: session.directory, method: "POST",
-        body: { model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools: toolOverrides, agent: requestAgent, system: runtimeInstructionSystem() || undefined, parts }
+      await submitSessionInput(session.id, session.directory, {
+        messageID: voiceMessageID, model: { providerID: model.providerID, modelID: model.id }, variant: state.selectedVariants[model.value] || undefined, tools: toolOverrides, agent: requestAgent, system: runtimeInstructionSystem() || undefined, parts
+      }, () => {
+        if (options.voice) beginConversationTurn(session, voiceMessageID);
+        state.messages.push(optimistic);
+        state.userScrolledAway = false;
+        state.statuses[session.id] = { type: "busy" };
+        els.prompt.value = "";
+        state.attachments = [];
+        renderAttachments(); renderHeader(); renderMessages(true);
+        autoSizePrompt(); updateConversationClearance();
+        if (window.ResizeObserver && !state.composerObserver) { state.composerObserver = new ResizeObserver(updateConversationClearance); state.composerObserver.observe(els.form); }
       });
       if (browserTaskRequested && state.browserRuntime?.visible) focusBrowserWindowSoon();
       log("prompt.accepted", `${model.providerID}/${model.id}`);
-      if (options.voice) state.voiceAwaitingResponse = true;
       setTimeout(() => refreshMessages(true), 250);
       return true;
     } catch (error) {
+      if (state.messages.includes(optimistic)) {
+        if (!els.prompt.value) els.prompt.value = text;
+        if (!state.attachments.length) state.attachments = pendingAttachments;
+        renderAttachments(); autoSizePrompt();
+        state.statuses[session.id] = { type: "idle" };
+      }
       state.messages = state.messages.filter((message) => message !== optimistic);
-      state.statuses[session.id] = { type: "idle" };
       renderHeader(); renderMessages();
-      toast(`Message was not sent: ${error.message}`, "error");
-      if (options.voice && state.conversationMode) scheduleConversationListening(500);
+      const notice = error.inputMayHaveReachedEngine ? "Delivery could not be confirmed. Check this conversation before sending again; the engine may already be working." : `Message was not sent: ${error.message}`;
+      setPromptDeliveryStatus(notice); toast(notice, "error");
+      if (options.voice && state.conversationMode) failConversationVoice(notice);
       return false;
     }
   }
@@ -2848,20 +3238,30 @@
   }
 
   async function runOpenCodeCommand(command, argumentsText = "", options = {}) {
+    if (state.selectedAgent === "chat") { toast("Switch to Build or Plan before running workspace commands.", "warn"); return false; }
     let session = selectedSession();
     if (!session) session = await newSession(false);
     const model = selectedModel();
     if (!session || !model) { toast("Choose a project and model first.", "warn"); return false; }
-    state.statuses[session.id] = { type: "busy" };
-    els.prompt.value = ""; autoSizePrompt(); renderHeader(); renderMessages(true);
+    const draft = els.prompt.value;
+    const voiceMessageID = options.voice ? nextVoiceMessageID() : undefined;
+    setPromptDeliveryStatus();
+    let submitted = false;
     try {
-      await api(`/session/${encodeURIComponent(session.id)}/command`, { directory: session.directory, method: "POST", body: { command: command.name, arguments: argumentsText, agent: state.selectedAgent === "chat" ? "build" : state.selectedAgent, model: `${model.providerID}/${model.id}` } });
-      if (options.voice) state.voiceAwaitingResponse = true;
+      await submitSessionInput(session.id, session.directory, { messageID: voiceMessageID, command: command.name, arguments: argumentsText, agent: state.selectedAgent, model: `${model.providerID}/${model.id}` }, () => {
+        if (options.voice) beginConversationTurn(session, voiceMessageID);
+        submitted = true;
+        state.statuses[session.id] = { type: "busy" };
+        els.prompt.value = ""; autoSizePrompt(); renderHeader(); renderMessages(true);
+      }, "command");
       await refreshMessages(true);
       return true;
     } catch (error) {
-      state.statuses[session.id] = { type: "idle" }; renderHeader();
-      toast(`Command /${command.name} failed: ${error.message}`, "error");
+      if (submitted) { state.statuses[session.id] = { type: "idle" }; if (!els.prompt.value) els.prompt.value = draft; autoSizePrompt(); }
+      renderHeader();
+      const notice = error.inputMayHaveReachedEngine ? "Command delivery could not be confirmed. Check this conversation before trying again; it may already be running." : `Command /${command.name} failed: ${error.message}`;
+      setPromptDeliveryStatus(notice); toast(notice, "error");
+      if (options.voice && state.conversationMode) failConversationVoice(notice);
       return false;
     }
   }
@@ -2869,6 +3269,7 @@
   async function abortSession() {
     const session = selectedSession();
     if (!session) return;
+    if (state.voiceTurn?.sessionID === session.id) stopConversationMode(false);
     try {
       await api(`/session/${encodeURIComponent(session.id)}/abort`, { directory: session.directory, method: "POST" });
       state.statuses[session.id] = { type: "idle" };
@@ -3040,30 +3441,145 @@
     scheduleAgentBoardSave(); renderAgentBoard();
   }
 
+  function createConnectionRecovery({ read, reconnect, close, status, online, visible, setTimer = setTimeout, clearTimer = clearTimeout }) {
+    let timer = null, running = null, controller = null, queued = false, queuedRestart = false;
+    let disposed = false, expired = false, attempts = 0, streamReady = false;
+    const cancelTimer = () => { if (timer !== null) clearTimer(timer); timer = null; };
+    function request(restart = true, delay = 0) {
+      if (disposed || expired) return;
+      if (!online()) { cancelTimer(); status("offline"); return; }
+      if (!visible()) return;
+      if (running) { queued = true; queuedRestart ||= restart; return running; }
+      cancelTimer();
+      timer = setTimer(() => { timer = null; void run(restart); }, delay);
+    }
+    async function run(restart) {
+      if (disposed || expired || running || !online() || !visible()) return;
+      const marker = {}; running = marker;
+      const abort = controller = new AbortController();
+      const timeout = setTimer(() => abort.abort(), 12000);
+      let retry = null, retryRestart = false;
+      try {
+        if (restart) { streamReady = false; status("reconnecting"); reconnect(); }
+        else status("syncing");
+        const applied = await read(abort.signal);
+        if (disposed || expired) return;
+        if (abort.signal.aborted) throw new Error("Recovery request timed out.");
+        if (applied === false) { retry = Math.min(2000, 250 * 2 ** Math.min(attempts++, 3)); }
+        else {
+          if (streamReady) attempts = 0;
+          status(streamReady ? "live" : "reconnecting");
+          if (!streamReady) { retry = Math.min(30000, 1000 * 2 ** Math.min(attempts++, 5)); retryRestart = true; }
+        }
+      } catch (error) {
+        if (disposed || !visible() || !online()) return;
+        if (error.status === 401 || error.status === 403) {
+          expired = true; queued = false; close(); status("expired"); return;
+        }
+        status("reconnecting");
+        retry = Math.min(30000, 1000 * 2 ** Math.min(attempts++, 5)); retryRestart = true;
+      } finally {
+        clearTimer(timeout);
+        if (controller === abort) controller = null;
+        if (running === marker) running = null;
+        if (!disposed && !expired && visible() && online()) {
+          if (queued) { const restartNext = queuedRestart; queued = queuedRestart = false; request(restartNext); }
+          else if (retry !== null) request(retryRestart, retry);
+        }
+      }
+    }
+    return {
+      request,
+      opened() { if (disposed || expired) return; streamReady = true; request(false); },
+      failed() { if (disposed || expired) return; streamReady = false; status(online() ? "reconnecting" : "offline"); if (!running) request(true, Math.min(30000, 1000 * 2 ** Math.min(attempts++, 5))); },
+      offline() { cancelTimer(); queued = queuedRestart = false; controller?.abort(); streamReady = false; close(); if (!disposed && !expired) status("offline"); },
+      pause() { cancelTimer(); queued = queuedRestart = false; controller?.abort(); },
+      dispose() { disposed = true; cancelTimer(); queued = false; controller?.abort(); close(); }
+    };
+  }
+
+  async function recoverConnectionState(signal) {
+    const sessionID = state.currentSessionID, directory = selectedSession()?.directory || state.currentDirectory;
+    const revision = state.streamRevision || 0;
+    const messageID = state.messageRefreshID = (state.messageRefreshID || 0) + 1;
+    const directoryID = state.directoryRefreshID = (state.directoryRefreshID || 0) + 1;
+    const options = { directory, signal }, global = { noDirectory: true, signal };
+    const [health, sessions, statuses, permissions, messages] = await Promise.all([
+      api("/global/health", global), api("/session", global), api("/session/status", options), api("/permission", options),
+      sessionID ? api(`/session/${encodeURIComponent(sessionID)}/message`, options) : Promise.resolve([])
+    ]);
+    if (!health?.healthy || !Array.isArray(sessions) || !Array.isArray(permissions) || !Array.isArray(messages) || !statuses || typeof statuses !== "object" || Array.isArray(statuses)) throw new Error("Incomplete recovery snapshot.");
+    if (signal.aborted || sessionID !== state.currentSessionID || directory !== (selectedSession()?.directory || state.currentDirectory) || revision !== (state.streamRevision || 0) || messageID !== state.messageRefreshID || directoryID !== state.directoryRefreshID) return false;
+    state.health = health;
+    state.sessions = sessions.map(normalizeSession);
+    state.statuses = statuses;
+    state.permissions = mergePermissionSnapshot(permissions, selectedSession());
+    state.messages = messages;
+    renderProjects(); renderSessions(); renderHeader(); renderUsage(); renderMessages(false); renderPermissions();
+    window.dispatchEvent(new CustomEvent("seneschal-question-refresh"));
+    return true;
+  }
+
+  function bindConnectionRecovery() {
+    const close = () => { state.eventSource?.close(); state.eventSource = null; };
+    const recovery = state.connectionRecovery = createConnectionRecovery({
+      read: recoverConnectionState, reconnect: connectEvents, close, status: setRecoveryStatus,
+      online: () => navigator.onLine !== false, visible: () => document.visibilityState !== "hidden"
+    });
+    const online = () => recovery.request(true);
+    const offline = () => recovery.offline();
+    const visibility = () => { if (document.visibilityState === "hidden") recovery.pause(); else recovery.request(true); };
+    const show = event => { if (event.persisted) recovery.request(true); };
+    const hide = event => { if (event.persisted) recovery.pause(); else cleanup(); };
+    const watchdog = setInterval(() => {
+      if (state.currentDirectory && Date.now() - (state.lastStreamActivity || 0) > 45000) recovery.request(true);
+    }, 10000);
+    function cleanup() {
+      clearInterval(watchdog); recovery.dispose();
+      window.removeEventListener("online", online); window.removeEventListener("offline", offline);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pageshow", show); window.removeEventListener("pagehide", hide);
+    }
+    window.addEventListener("online", online); window.addEventListener("offline", offline);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pageshow", show); window.addEventListener("pagehide", hide);
+    state.disposeConnectionRecovery = cleanup;
+  }
+
   function connectEvents() {
     state.eventSource?.close();
     if (!state.currentDirectory) return;
     const source = new EventSource(withDirectory("/api/event", selectedSession()?.directory || state.currentDirectory));
     state.eventSource = source;
-    source.onopen = () => { setConnection("online", "Live"); els.pulseLabel.textContent = "LIVE"; log("stream.open", basename(state.currentDirectory)); };
-    source.onerror = () => { setConnection("", "Reconnecting"); els.pulseLabel.textContent = "RETRY"; };
+    source.onopen = () => {
+      if (state.eventSource !== source) return;
+      state.lastStreamActivity = Date.now();
+      if (state.connectionRecovery) state.connectionRecovery.opened();
+      else { setConnection("online", "Live"); els.pulseLabel.textContent = "LIVE"; }
+      log("stream.open", basename(state.currentDirectory));
+    };
+    source.onerror = () => {
+      if (state.eventSource !== source) return;
+      source.close(); state.eventSource = null;
+      if (state.connectionRecovery) state.connectionRecovery.failed();
+      else { setConnection("", "Reconnecting"); els.pulseLabel.textContent = "RETRY"; }
+    };
     source.onmessage = (event) => {
+      if (state.eventSource !== source) return;
+      state.lastStreamActivity = Date.now();
       let payload;
       try { payload = JSON.parse(event.data); } catch { return; }
+      if (/^(session\.|message\.|permission\.)/.test(payload.type || "")) state.streamRevision = (state.streamRevision || 0) + 1;
       recordOpenCodeEvent(payload);
       window.dispatchEvent(new CustomEvent('seneschal-activity', { detail: payload }));
       log(payload.type || "event", payload.properties?.sessionID || payload.id || "");
       const properties = payload.properties || {};
       if (payload.type === "session.status") {
-        const wasWorking = ["busy", "retry"].includes(sessionStatus(properties.sessionID));
         state.statuses[properties.sessionID] = properties.status;
         renderSessions(); renderHeader(); renderMessages(true);
         const nowIdle = sessionStatus(properties.sessionID) === "idle";
         reconcileAgentBoardStatuses(state.statuses).catch(() => null);
-        if (state.conversationMode && state.voiceAwaitingResponse && properties.sessionID === state.currentSessionID && wasWorking && nowIdle) {
-          state.voiceAwaitingResponse = false;
-          refreshMessages(true).then(speakLatestAssistant).catch(() => scheduleConversationListening(500));
-        }
+        if (state.conversationMode && state.voiceAwaitingResponse && properties.sessionID === state.voiceTurn?.sessionID && nowIdle) void checkConversationReply();
       } else if (payload.type === "session.created") {
         if (!state.sessions.some((session) => session.id === properties.info?.id)) state.sessions.push(normalizeSession(properties.info));
         renderProjects(); renderSessions();
@@ -3080,6 +3596,7 @@
         if (!sessionID || sessionID === state.currentSessionID) scheduleMessageRefresh(true);
       } else if (payload.type === "permission.asked" || payload.type === "permission.updated") {
         const permission = properties;
+        if (state.permissionReplies.get(permission.id)?.status === "resolved") return;
         state.permissionMisses[permission.id] = 0;
         const index = state.permissions.findIndex((item) => item.id === permission.id);
         if (index >= 0) state.permissions[index] = permission; else state.permissions.push(permission);
@@ -3087,14 +3604,13 @@
         toast("Approval required — review the request above the message box.", "warn");
       } else if (payload.type === "permission.replied") {
         const requestID = properties.requestID || properties.permissionID || properties.id;
-        delete state.permissionMisses[requestID];
-        state.permissions = state.permissions.filter((item) => item.id !== requestID);
+        completePermissionReply(requestID);
         renderPermissions();
       } else if (payload.type === "session.error") {
         let detail = properties.error?.data?.message || properties.error?.message || "The active model returned an error.";
         const boardWorker = state.agentBoard.agents.find((agent) => agent.sessionID === properties.sessionID && agent.status === "running");
         if (boardWorker) { boardWorker.status = "failed"; boardWorker.error = detail; boardWorker.completedAt = Date.now(); scheduleAgentBoardSave(); renderAgentBoard(); scheduleReadyBoardAgents(); }
-        if (/ProviderModelNotFoundError|Model not found:\s*opencode\/x-preview-f-free/i.test(detail)) detail = "Ox Alpha is not available in this OpenCode engine version. Run the Seneschal updater, fully close the app, and reopen it.";
+        if (/Model not found:\s*opencode\/x-preview-f-free\b/i.test(detail)) detail = "Ox Alpha is not available in the running PC engine. Choose another model; engine updates are managed on the PC.";
         const retryableOutage = properties.error?.data?.statusCode === 503 || /endpoint is unavailable|service unavailable/i.test(detail);
         if (retryableOutage && properties.sessionID === state.currentSessionID) {
           abortSession().catch(() => null);
@@ -3118,19 +3634,73 @@
     } catch { /* Event stream remains the primary path. */ }
   }
 
-  async function replyPermission(permission, reply) {
-    try {
-      const permissionDirectory = state.sessions.find((session) => session.id === permission.sessionID)?.directory || state.currentDirectory;
-      try {
-        await api(`/permission/${encodeURIComponent(permission.id)}/reply`, { directory: permissionDirectory, method: "POST", body: { reply } });
-      } catch {
-        await api(`/session/${encodeURIComponent(permission.sessionID)}/permissions/${encodeURIComponent(permission.id)}`, { directory: permissionDirectory, method: "POST", body: { response: reply } });
+  async function permissionRequest(path, options) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try { return await api(path, { ...options, signal: controller.signal }); }
+    finally { clearTimeout(timer); }
+  }
+
+  function completePermissionReply(requestID) {
+    if (!requestID) return;
+    state.permissionReplies.set(requestID, { status: "resolved" });
+    delete state.permissionMisses[requestID];
+    state.permissions = state.permissions.filter(item => item.id !== requestID);
+    // Keep a bounded tombstone cache so late snapshots cannot restore answered prompts.
+    if (state.permissionReplies.size > 256) {
+      for (const [id, action] of state.permissionReplies) {
+        if (state.permissionReplies.size <= 256) break;
+        if (id !== requestID && action.status === "resolved") state.permissionReplies.delete(id);
       }
-      delete state.permissionMisses[permission.id];
-      state.permissions = state.permissions.filter((item) => item.id !== permission.id);
+    }
+  }
+
+  async function checkPermissionReply(permission) {
+    const action = state.permissionReplies.get(permission.id);
+    if (action?.status !== "uncertain" || action.checking) return;
+    action.checking = true; renderPermissions();
+    try {
+      const latest = await permissionRequest("/permission", { directory: action.directory });
+      if (!Array.isArray(latest)) throw new Error("Invalid approval status response");
+      // A newer reply event or another status check wins over this snapshot.
+      if (state.permissionReplies.get(permission.id) !== action) return;
+      const stillPending = latest.some(item => item.id === permission.id && item.sessionID === permission.sessionID);
+      if (stillPending) {
+        state.permissionReplies.delete(permission.id);
+        toast("The PC still lists this approval. Choose a decision again only if you intend to send it.", "warn");
+      } else completePermissionReply(permission.id);
+    } catch {
+      if (state.permissionReplies.get(permission.id) === action) action.message = "Could not check the PC. Your decision was not resent. Reconnect, then check status again.";
+    } finally {
+      action.checking = false; renderPermissions();
+    }
+  }
+
+  async function replyPermission(permission, reply) {
+    if (!["once", "always", "reject"].includes(reply) || state.permissionReplies.has(permission.id)) return;
+    if (!state.permissions.some(item => item.id === permission.id && item.sessionID === permission.sessionID)) return;
+    const permissionDirectory = state.sessions.find((session) => session.id === permission.sessionID)?.directory || state.currentDirectory;
+    const action = { status: "pending", directory: permissionDirectory };
+    state.permissionReplies.set(permission.id, action);
+    renderPermissions();
+    try {
+      try {
+        await permissionRequest(`/permission/${encodeURIComponent(permission.id)}/reply`, { directory: permissionDirectory, method: "POST", body: { reply } });
+      } catch (error) {
+        if (state.permissionReplies.get(permission.id)?.status === "resolved") return;
+        // Only a definitive missing route/method may use the legacy endpoint.
+        // Never retry a timeout, lost response, auth failure or server error.
+        if (![404, 405].includes(error.status)) throw error;
+        await permissionRequest(`/session/${encodeURIComponent(permission.sessionID)}/permissions/${encodeURIComponent(permission.id)}`, { directory: permissionDirectory, method: "POST", body: { response: reply } });
+      }
+      completePermissionReply(permission.id);
       renderPermissions();
       log("permission.reply", reply);
-    } catch (error) { toast(`Could not answer the permission request: ${error.message}`, "error"); }
+    } catch {
+      if (state.permissionReplies.get(permission.id)?.status === "resolved") return;
+      action.status = "uncertain"; renderPermissions();
+      toast("Could not confirm the approval reply. Nothing was resent. Use Check status before trying again.", "error");
+    }
   }
 
   function renderAttachments() {
@@ -3139,23 +3709,45 @@
     $$('[data-remove]', els.attachmentStrip).forEach((button) => button.addEventListener("click", () => { state.attachments.splice(Number(button.dataset.remove), 1); renderAttachments(); }));
   }
 
+  function renderVoiceControl() {
+    const button = $("#voiceButton");
+    const micActive = els.mic.getAttribute("aria-pressed") === "true";
+    const stage = state.conversationMode ? els.talk.dataset.stage : micActive ? els.mic.dataset.stage : "";
+    const label = stage ? `${state.conversationMode ? "Talk" : "Mic"} · ${stage}` : "Voice";
+    $(".voice-label", button).textContent = label;
+    button.dataset.active = state.conversationMode ? "talk" : micActive ? "mic" : "none";
+    button.setAttribute("aria-pressed", String(state.conversationMode || micActive));
+    button.setAttribute("aria-label", state.conversationMode ? "Stop Talk mode" : micActive ? "Stop voice dictation or recording" : "Start Talk mode");
+    const voiceStatus = $("#composerVoiceStatus");
+    if (voiceStatus) { voiceStatus.hidden = !state.conversationMode && !micActive; voiceStatus.textContent = state.conversationMode ? "Talk active" : micActive ? "Mic active" : ""; }
+    button.title = state.conversationMode || micActive ? `${label} — click to stop` : "Start Talk — sends spoken turns and reads replies. Use the arrow for options.";
+    if (typeof renderVoiceMuteControls === "function") renderVoiceMuteControls();
+  }
+
   function setListening(active, label = "Listening") {
     els.mic.classList.toggle("listening", active);
     els.mic.setAttribute("aria-pressed", String(active));
     els.mic.setAttribute("aria-label", active ? `Stop ${label.toLowerCase()}` : "Start voice dictation or recording");
-    $("span", els.mic).textContent = active ? label : "Mic";
+    els.mic.dataset.stage = active ? label : "";
+    els.mic.title = active ? `Stop ${label.toLowerCase()}` : "Dictate or record a voice message";
+    $("span", els.mic).textContent = active ? `Stop ${label.toLowerCase()}` : "Dictate";
+    renderVoiceControl();
   }
 
   function setTalkState(stage = "") {
     if (!els.talk) return;
     const active = state.conversationMode;
+    try { if (typeof window !== 'undefined') window.SeneschalAres?.setState(active ? (stage || 'Ready') : 'Idle'); } catch { /* Decorative graphics must never interrupt Talk. */ }
     els.talk.classList.toggle("active", active);
     els.talk.classList.toggle("speaking", active && stage === "Speaking");
     els.talk.setAttribute("aria-pressed", String(active));
     els.talk.setAttribute("aria-label", active ? "Stop Talk mode" : "Start Talk mode");
-    $("span", els.talk).textContent = active ? (stage || "Talk on") : "Talk";
+    els.talk.dataset.stage = active ? (stage || "Ready") : "";
+    els.talk.title = active ? "Stop Talk mode" : "Start turn-by-turn voice conversation";
+    $("span", els.talk).textContent = active ? "Stop Talk" : "Talk";
     const settingsVoice = $("#settingsVoice");
     if (settingsVoice) settingsVoice.textContent = active ? `On · ${stage || "Ready"}` : "Turn-by-turn · Ready";
+    renderVoiceControl();
   }
 
   function cleanSpeechText(value = "") {
@@ -3175,30 +3767,178 @@
   function scheduleConversationListening(delay = 350) {
     clearTimeout(state.conversationRestartTimer);
     if (!state.conversationMode) return;
+    if (state.voiceMicMuted) { if (!state.voiceSpeaking && !state.voiceAwaitingResponse) setTalkState('Mic muted'); return; }
     state.conversationRestartTimer = setTimeout(startConversationListening, delay);
+  }
+
+  function renderVoiceMuteControls() {
+    for (const button of document.querySelectorAll('[data-voice-mute]')) {
+      const mic = button.dataset.voiceMute === 'mic', muted = Boolean(mic ? state.voiceMicMuted : state.voiceSpeakerMuted);
+      const label = `${muted ? 'Unmute' : 'Mute'} ${mic ? 'microphone' : 'speaker'}`;
+      button.setAttribute('aria-pressed', String(muted)); button.setAttribute('aria-label', label); button.title = label;
+      const copy = button.querySelector('[data-mute-label]');
+      if (copy) copy.textContent = `${muted ? 'Unmute' : 'Mute'} ${mic ? 'mic' : 'speaker'}`;
+    }
+    for (const group of document.querySelectorAll('.voice-live-controls')) group.hidden = !state.conversationMode;
+    const status = document.getElementById('voiceMuteStatus');
+    if (status) status.textContent = `Mic ${state.voiceMicMuted ? 'muted — no new audio captured' : 'on'} · Speaker ${state.voiceSpeakerMuted ? 'muted — replies stay in chat' : 'on'}`;
+  }
+
+  function setVoiceMicMuted(muted) {
+    state.voiceMicMuted = Boolean(muted);
+    if (state.voiceMicMuted) {
+      clearTimeout(state.conversationRestartTimer);
+      const recognition = state.conversationRecognition;
+      state.conversationRecognition = null; recognition?.abort();
+      const dictation = state.speechRecognition;
+      state.speechRecognition = null; dictation?.abort();
+      state.mediaCaptureEpoch = (state.mediaCaptureEpoch || 0) + 1;
+      const recorder = state.mediaRecorder, stream = state.mediaStream;
+      state.mediaRecorder = null; state.mediaStream = null; state.mediaChunks = [];
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      stream?.getTracks().forEach(track => track.stop());
+      if (typeof setListening === 'function') setListening(false);
+    }
+    if (state.conversationMode && !state.voiceSpeaking && !state.voiceAwaitingResponse) {
+      setTalkState(state.voiceMicMuted ? 'Mic muted' : 'Ready');
+      if (!state.voiceMicMuted) scheduleConversationListening(150);
+    }
+    renderVoiceMuteControls();
+  }
+
+  function setVoiceSpeakerMuted(muted) {
+    state.voiceSpeakerMuted = Boolean(muted);
+    if (state.voiceSpeakerMuted && state.voiceSpeaking) {
+      // Invalidate this playback first: cancellation callbacks cannot restart it.
+      clearConversationTurn(); state.voiceSpeaking = false;
+      window.SeneschalNvidiaVoice?.cancelSpeech?.(); window.speechSynthesis?.cancel();
+      if (state.conversationMode) { setTalkState(state.voiceMicMuted ? 'Mic muted' : 'Listening'); scheduleConversationListening(200); }
+    }
+    renderVoiceMuteControls();
+  }
+
+  function nextVoiceMessageID() {
+    // Match OpenCode 1.19's ascending message-ID layout, including time ordering.
+    const now = Math.max(Date.now(), state.voiceIDTime || 0);
+    state.voiceIDCounter = now === state.voiceIDTime ? (state.voiceIDCounter || 0) + 1 : 1;
+    state.voiceIDTime = now;
+    const time = ((BigInt(now) * 4096n + BigInt(state.voiceIDCounter)) & 0xffffffffffffn).toString(16).padStart(12, '0');
+    const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    const random = window.crypto.getRandomValues(new Uint8Array(14));
+    return `msg_${time}${Array.from(random, byte => alphabet[byte % alphabet.length]).join('')}`;
+  }
+
+  function currentConversationTurn(turn) {
+    return Boolean(turn && state.conversationMode && state.voiceTurn === turn && state.currentSessionID === turn.sessionID);
+  }
+
+  function clearConversationTurn() {
+    const turn = state.voiceTurn;
+    state.voiceTurn = null;
+    state.voiceAwaitingResponse = false;
+    if (turn) { clearTimeout(turn.timer); turn.controller?.abort(); }
+  }
+
+  function beginConversationTurn(session, messageID) {
+    clearConversationTurn();
+    if (!state.conversationMode || state.currentSessionID !== session.id) return;
+    const turn = { sessionID: session.id, directory: session.directory, messageID, started: Date.now(), checking: false, spoken: false };
+    state.voiceTurn = turn;
+    state.voiceAwaitingResponse = true;
+    setTalkState('Thinking');
+    turn.timer = setTimeout(() => { void checkConversationReply(turn); }, 500);
+  }
+
+  function replyForConversationTurn(messages, turn) {
+    return [...messages].reverse().find(item => item.info?.role === 'assistant' && item.info.sessionID === turn.sessionID && item.info.parentID === turn.messageID && !item.info.summary && !item.info.error && Number.isFinite(item.info.time?.completed) && item.info.finish && !['tool-calls', 'unknown'].includes(item.info.finish));
+  }
+
+  async function checkConversationReply(turn = state.voiceTurn) {
+    if (turn && state.voiceTurn === turn && state.currentSessionID !== turn.sessionID) { stopConversationMode(false); return; }
+    if (!currentConversationTurn(turn) || turn.checking || turn.spoken) return;
+    if (Date.now() - turn.started > 300000) { failConversationVoice('Voice stopped waiting for this reply. The task was not cancelled; check the chat before restarting Talk.'); return; }
+    clearTimeout(turn.timer);
+    turn.checking = true;
+    const control = new AbortController(); turn.controller = control;
+    const timeout = setTimeout(() => control.abort(), 8000);
+    try {
+      const options = { directory: turn.directory, signal: control.signal };
+      const revision = state.streamRevision || 0;
+      const [messages, statuses] = await Promise.all([api(`/session/${encodeURIComponent(turn.sessionID)}/message`, options), api('/session/status', options)]);
+      if (!currentConversationTurn(turn) || !Array.isArray(messages) || !statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return;
+      if (revision !== (state.streamRevision || 0)) return;
+      const status = statuses[turn.sessionID];
+      const kind = typeof status === 'string' ? status : status?.type || status?.status;
+      if (status !== undefined && kind !== 'idle') return;
+      state.statuses[turn.sessionID] = status || { type: 'idle' };
+      if (messages.some(item => item.info?.role === 'assistant' && item.info.sessionID === turn.sessionID && item.info.parentID === turn.messageID && item.info.error)) {
+        failConversationVoice('The current reply failed. Check its message in chat; an older answer was not read aloud.'); return;
+      }
+      speakLatestAssistant(turn, messages);
+    } catch {
+      // Read-only recovery only: never resend the prompt or read an older answer.
+    } finally {
+      clearTimeout(timeout); turn.checking = false;
+      if (turn.controller === control) turn.controller = null;
+      if (currentConversationTurn(turn) && state.voiceAwaitingResponse && !turn.spoken) turn.timer = setTimeout(() => { void checkConversationReply(turn); }, 900);
+    }
   }
 
   function stopConversationMode(showNotice = true) {
     state.conversationMode = false;
+    clearConversationTurn();
     storage.set("seneschal-talk-mode", false);
     clearTimeout(state.conversationRestartTimer);
-    state.conversationRecognition?.abort();
+    const recognition = state.conversationRecognition;
     state.conversationRecognition = null;
+    recognition?.abort();
     state.voiceAwaitingResponse = false;
     state.voiceSpeaking = false;
+    window.SeneschalNvidiaVoice?.stop();
     window.speechSynthesis?.cancel();
     setTalkState();
     if (showNotice) toast("Talk mode stopped.");
   }
 
-  function speakLatestAssistant() {
-    if (!state.conversationMode) return;
-    const message = [...state.messages].reverse().find((item) => item.info?.role !== "user" && (item.parts || []).some((part) => part.type === "text" && part.text));
+  function failConversationVoice(message) {
+    stopConversationMode(false);
+    const feedback = $("#voiceFeedback");
+    if (feedback) feedback.textContent = message;
+    toast(message, "warn");
+  }
+
+  function voiceServiceAvailable() {
+    if ($("#voiceServiceSelect")?.value === "nvidia" && !window.SeneschalNvidiaVoice) {
+      failConversationVoice("NVIDIA voice has not loaded. Finish active tasks, restart Seneschal on the PC, then reload this page. Browser speech was not used instead.");
+      return false;
+    }
+    return true;
+  }
+
+  function speakLatestAssistant(turn = state.voiceTurn, messages = state.messages) {
+    if (!currentConversationTurn(turn) || turn.spoken || state.voiceSpeaking) return;
+    if (!voiceServiceAvailable()) return;
+    const message = replyForConversationTurn(messages, turn);
     const messageID = message?.info?.id || "";
-    if (!message || (messageID && messageID === state.lastSpokenMessageID)) { scheduleConversationListening(400); return; }
+    if (!message) return;
     const spoken = cleanSpeechText((message.parts || []).filter((part) => part.type === "text").map((part) => part.text || "").join(" "));
-    if (!spoken || !window.speechSynthesis) { scheduleConversationListening(400); return; }
+    if (!spoken || state.voiceSpeakerMuted) { clearConversationTurn(); setTalkState(state.voiceMicMuted ? 'Mic muted' : 'Listening'); scheduleConversationListening(400); return; }
+    if (!window.SeneschalNvidiaVoice?.selected() && !window.speechSynthesis) { failConversationVoice('The selected voice service cannot play this reply. Check Voice before restarting Talk.'); return; }
+    turn.spoken = true;
+    clearTimeout(turn.timer);
+    state.voiceAwaitingResponse = false;
     state.lastSpokenMessageID = messageID;
+    const ended = () => { if (!currentConversationTurn(turn)) return; clearConversationTurn(); state.voiceSpeaking = false; setTalkState(state.voiceMicMuted ? 'Mic muted' : 'Listening'); scheduleConversationListening(250); };
+    const failed = error => { if (currentConversationTurn(turn)) failConversationVoice(error?.message || 'Voice playback stopped. Check the current reply in chat.'); };
+    if (window.SeneschalNvidiaVoice?.selected()) {
+      state.voiceSpeaking = true;
+      void window.SeneschalNvidiaVoice.speak(spoken, {
+        onState: stage => { if (currentConversationTurn(turn)) setTalkState(stage); },
+        onEnd: ended,
+        onError: failed
+      });
+      return;
+    }
     const utterance = new SpeechSynthesisUtterance(spoken);
     utterance.lang = navigator.language || "en-US";
     utterance.rate = 1.02;
@@ -3206,17 +3946,40 @@
     const voices = window.speechSynthesis.getVoices();
     const language = utterance.lang.split("-")[0].toLowerCase();
     utterance.voice = voices.find((voice) => voice.lang?.toLowerCase().startsWith(language) && /natural|online|aria|guy|ryan/i.test(voice.name)) || voices.find((voice) => voice.lang?.toLowerCase().startsWith(language)) || null;
-    utterance.onstart = () => { state.voiceSpeaking = true; setTalkState("Speaking"); };
-    utterance.onend = () => { state.voiceSpeaking = false; setTalkState("Listening"); scheduleConversationListening(250); };
-    utterance.onerror = () => { state.voiceSpeaking = false; setTalkState("Listening"); scheduleConversationListening(400); };
+    state.voiceSpeaking = true;
+    utterance.onstart = () => { if (currentConversationTurn(turn)) setTalkState("Speaking"); };
+    utterance.onend = ended;
+    utterance.onerror = failed;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   }
 
   function startConversationListening() {
     if (!state.conversationMode || state.conversationRecognition || state.voiceSpeaking || state.voiceAwaitingResponse) return;
+    if (state.voiceMicMuted) { setTalkState('Mic muted'); return; }
+    if (els.prompt.value.trim() || state.attachments.length) {
+      const feedback = $('#voiceFeedback');
+      if (feedback) feedback.textContent = 'Your draft is kept. Send or clear it, then restart Talk to listen again.';
+      setTalkState('Ready'); return;
+    }
+    if (!voiceServiceAvailable()) return;
     const session = selectedSession();
     if (session && ["busy", "retry"].includes(sessionStatus(session.id))) { scheduleConversationListening(500); return; }
+    if (window.SeneschalNvidiaVoice?.selected()) {
+      const capture = window.SeneschalNvidiaVoice.listen({
+        onState: stage => { if (state.conversationMode && !state.voiceMicMuted) setTalkState(stage); },
+        onResult: async text => {
+          if (state.conversationRecognition !== capture || !state.conversationMode || state.voiceMicMuted) return;
+          state.conversationRecognition = null;
+          if (!text.trim()) { scheduleConversationListening(700); return; }
+          els.prompt.value = text; autoSizePrompt(); setTalkState('Thinking');
+          await sendPrompt(text, { voice: true });
+        },
+        onError: error => { if (state.conversationRecognition === capture && !state.voiceMicMuted) failConversationVoice(error.message); }
+      });
+      state.conversationRecognition = capture;
+      return;
+    }
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) { stopConversationMode(false); toast("Talk mode needs current Chrome or Edge speech recognition.", "warn"); return; }
     const recognition = new SpeechRecognition();
@@ -3225,24 +3988,28 @@
     recognition.lang = navigator.language || "en-US";
     state.conversationRecognition = recognition;
     let transcript = "";
-    recognition.onstart = () => setTalkState("Listening");
+    recognition.onstart = () => { if (state.conversationMode && state.conversationRecognition === recognition) setTalkState("Listening"); };
     recognition.onresult = (event) => {
+      if (!state.conversationMode || state.conversationRecognition !== recognition) return;
       transcript = "";
       for (let index = 0; index < event.results.length; index += 1) transcript += event.results[index][0]?.transcript || "";
       els.prompt.value = transcript.trimStart();
       autoSizePrompt();
     };
     recognition.onerror = (event) => {
-      if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event.error)) {
-        stopConversationMode(false);
-        toast(event.error === "audio-capture" ? "No working microphone was found." : "Microphone access was blocked. Allow it in the browser and try again.", "warn");
-      } else if (!['aborted', 'no-speech'].includes(event.error)) {
-        toast(`Talk mode paused: ${event.error}.`, "warn");
-      }
+      if (!state.conversationMode || state.conversationRecognition !== recognition || event.error === "no-speech") return;
+      const messages = {
+        "network": "Browser speech could not reach its service. Talk stopped. Open Voice and select NVIDIA cloud, accept its notice, then start Talk; no service was switched automatically.",
+        "not-allowed": "Microphone access was blocked. Allow it in the browser, then start Talk again.",
+        "service-not-allowed": "The browser speech service is unavailable or blocked. Choose a voice service in Voice; no fallback was used.",
+        "audio-capture": "No working microphone was found. Check your microphone, then start Talk again."
+      };
+      failConversationVoice(messages[event.error] || "Browser speech stopped unexpectedly. Check the voice service, then start Talk again.");
     };
     recognition.onend = async () => {
-      if (state.conversationRecognition === recognition) state.conversationRecognition = null;
-      if (!state.conversationMode) return;
+      if (state.conversationRecognition !== recognition) return;
+      state.conversationRecognition = null;
+      if (!state.conversationMode || state.voiceMicMuted) return;
       const clean = transcript.trim();
       if (!clean) { els.prompt.value = ""; autoSizePrompt(); scheduleConversationListening(450); return; }
       setTalkState("Thinking");
@@ -3254,16 +4021,21 @@
 
   function toggleConversationMode() {
     if (state.conversationMode) { stopConversationMode(); return; }
+    if (!voiceServiceAvailable()) return;
     if (els.prompt.value.trim() || state.attachments.length) { toast("Send or clear the current draft before starting Talk mode.", "warn"); return; }
     if (!state.currentDirectory || !state.models.length) { toast("Choose a project and connect a model before starting Talk mode.", "warn"); return; }
-    if (!(window.SpeechRecognition || window.webkitSpeechRecognition) || !window.speechSynthesis) { toast("Talk mode needs current Chrome or Edge with microphone access.", "warn"); return; }
+    if (window.SeneschalNvidiaVoice?.selected()) {
+      if (!window.SeneschalNvidiaVoice.ready()) { toast('Accept the NVIDIA cloud-audio notice inside Voice first.', 'warn'); return; }
+    } else if (!(window.SpeechRecognition || window.webkitSpeechRecognition) || !window.speechSynthesis) { toast("Talk mode needs current Chrome or Edge with microphone access.", "warn"); return; }
     if (state.speechRecognition) state.speechRecognition.abort();
     if (state.mediaRecorder) stopMediaRecording();
     state.conversationMode = true;
     storage.set("seneschal-talk-mode", true);
     state.voiceAwaitingResponse = false;
+    const feedback = $("#voiceFeedback");
+    if (feedback) feedback.textContent = window.SeneschalNvidiaVoice?.selected() ? "NVIDIA cloud voice selected. Audio and spoken reply text use the NVIDIA trial." : "Browser voice selected. This does not use NVIDIA speech.";
     setTalkState("Listening");
-    toast("Talk mode is on — speak naturally, My Lord. Click Talk to stop.");
+    toast("Talk mode is on — speak naturally, My Lord. Click Voice again to stop; use its arrow for options.");
     startConversationListening();
   }
 
@@ -3276,16 +4048,19 @@
       toast("This browser does not provide microphone recording. Open the workspace in current Chrome or Edge.", "warn");
       return;
     }
+    const captureEpoch = state.mediaCaptureEpoch = (state.mediaCaptureEpoch || 0) + 1;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      if (state.voiceMicMuted || state.mediaCaptureEpoch !== captureEpoch) { stream.getTracks().forEach(track => track.stop()); return; }
       const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) => MediaRecorder.isTypeSupported(type));
       const recorder = preferred ? new MediaRecorder(stream, { mimeType: preferred }) : new MediaRecorder(stream);
       state.mediaStream = stream;
       state.mediaRecorder = recorder;
       state.mediaChunks = [];
-      recorder.ondataavailable = (event) => { if (event.data?.size) state.mediaChunks.push(event.data); };
-      recorder.onerror = () => toast("The voice recording could not be completed.", "error");
+      recorder.ondataavailable = (event) => { if (!state.voiceMicMuted && state.mediaCaptureEpoch === captureEpoch && event.data?.size) state.mediaChunks.push(event.data); };
+      recorder.onerror = () => { if (state.mediaCaptureEpoch === captureEpoch) toast("The voice recording could not be completed.", "error"); };
       recorder.onstop = async () => {
+        if (state.voiceMicMuted || state.mediaCaptureEpoch !== captureEpoch) { stream.getTracks().forEach(track => track.stop()); return; }
         const type = recorder.mimeType || state.mediaChunks[0]?.type || "audio/webm";
         const extension = type.includes("mp4") ? "m4a" : "webm";
         const stamp = new Date().toISOString().replace(/[:T]/g, "-").replace(/\.\d{3}Z$/, "");
@@ -3297,8 +4072,9 @@
       };
       recorder.start(250);
       setListening(true, "Recording");
-      toast("Recording voice message — click Mic again to finish.");
+      toast("Recording voice message — open Voice to finish recording.");
     } catch (error) {
+      if (state.mediaCaptureEpoch !== captureEpoch) return;
       state.mediaStream?.getTracks().forEach((track) => track.stop());
       state.mediaStream = null; state.mediaRecorder = null; setListening(false);
       toast(error.name === "NotAllowedError" ? "Microphone access was blocked. Allow it in the browser and try again." : `Could not start the microphone: ${error.message}`, "warn");
@@ -3307,6 +4083,9 @@
 
   async function toggleVoiceDictation() {
     if (state.conversationMode) stopConversationMode(false);
+    if (!voiceServiceAvailable()) return;
+    if (state.voiceMicMuted) { toast('Microphone is muted. Unmute it in Voice before dictating.', 'warn'); return; }
+    if (window.SeneschalNvidiaVoice?.selected()) { toast('NVIDIA speech uses Talk. Choose Browser voice to use Dictate or attach a recording.', 'warn'); return; }
     if (state.speechRecognition) {
       state.speechRecognition.stop();
       return;
@@ -3323,8 +4102,9 @@
     recognition.lang = navigator.language || "en-US";
     state.speechBaseText = els.prompt.value;
     state.speechRecognition = recognition;
-    recognition.onstart = () => { setListening(true); toast("Listening — click Mic again when finished."); };
+    recognition.onstart = () => { if (state.speechRecognition !== recognition || state.voiceMicMuted) return; setListening(true); toast("Listening — open Voice and choose Stop listening when finished."); };
     recognition.onresult = (event) => {
+      if (state.speechRecognition !== recognition || state.voiceMicMuted) return;
       let transcript = "";
       for (let index = 0; index < event.results.length; index += 1) transcript += event.results[index][0]?.transcript || "";
       const spacer = state.speechBaseText && !/\s$/.test(state.speechBaseText) ? " " : "";
@@ -3332,6 +4112,7 @@
       autoSizePrompt();
     };
     recognition.onerror = (event) => {
+      if (state.speechRecognition !== recognition || state.voiceMicMuted) return;
       const messages = {
         "not-allowed": "Microphone access was blocked. Allow microphone access in the browser and try again.",
         "audio-capture": "No working microphone was found.",
@@ -3341,7 +4122,8 @@
       if (event.error !== "aborted") toast(messages[event.error] || `Voice dictation stopped: ${event.error}.`, "warn");
     };
     recognition.onend = () => {
-      if (state.speechRecognition === recognition) state.speechRecognition = null;
+      if (state.speechRecognition !== recognition) return;
+      state.speechRecognition = null;
       setListening(false);
       els.prompt.focus();
     };
@@ -3425,11 +4207,12 @@
   function openSettings() {
     $("#settingsEngine").textContent = `OpenCode ${state.health?.version || ""}`.trim();
     $("#settingsDeepSeek").textContent = (state.providers.connected || []).includes("deepseek") ? "Connected" : "Ready for key";
-    setTalkState(state.voiceSpeaking ? "Speaking" : state.voiceAwaitingResponse ? "Thinking" : state.conversationMode ? "Listening" : "");
+    setTalkState(state.voiceSpeaking ? "Speaking" : state.voiceAwaitingResponse ? "Thinking" : state.conversationMode ? state.voiceMicMuted ? "Mic muted" : "Listening" : "");
     renderActiveSkillCount();
     $("#settingsArchives").textContent = `${ordinarySessions().filter((session) => state.archivedSessions.has(session.id)).length} archived`;
     renderAgentBoard(); renderVsCode();
     els.settingsDialog.showModal();
+    void refreshBackupStatus();
   }
 
   function renderArchiveManager() {
@@ -3602,10 +4385,13 @@
       { icon: "C", title: "ChatGPT Chat", subtitle: "Open normal ChatGPT with its separate chat allowance", kind: "Companion", run: openChatGPTSpace },
       { icon: "3D", title: "Open Blender", subtitle: "Start Blender and its local MCP bridge", kind: "Creative", run: openBlender },
       { icon: "◐", title: "Switch day / night", subtitle: "Change the matte atelier palette", kind: "Theme", run: toggleTheme },
+      { icon: "PX", title: "Atmosphere collection", subtitle: "Nine pixel worlds, customization, preview and rotation", kind: "Theme", run: openAtmospheres },
+      { icon: "CL", title: "Citylight", subtitle: "Restored original jade skyline and copper moon", kind: "Motion", run: () => setMotion("citylight") },
       { icon: "A", title: "Orbit Drift", subtitle: "Slow geometric welcome animation", kind: "Motion", run: () => setMotion("orbit") },
       { icon: "PX", title: "City Nocturne", subtitle: "Cinematic architectural pixel background", kind: "Motion", run: () => setMotion("pixel-city") },
       { icon: "LR", title: "Lunar Relay", subtitle: "Cinematic moon installation and tracking array", kind: "Motion", run: () => setMotion("lunar-relay") },
       { icon: "OF", title: "Orbital Foundry", subtitle: "Industrial station above a planetary horizon", kind: "Motion", run: () => setMotion("orbital-foundry") },
+      ...Object.entries(motionPresets).filter(([id]) => id.startsWith("afterlight-")).map(([id, preset]) => ({ icon: "AL", title: preset.label, subtitle: "Afterlight pixel world", kind: "Motion", run: () => setMotion(id) })),
       { icon: "—", title: "Still composition", subtitle: "Disable welcome animation", kind: "Motion", run: () => setMotion("still") },
       ...(selectedSession() ? [
         { icon: "↓", title: "Export conversation", subtitle: "Download a portable JSON copy", kind: "Action", run: exportSession },
@@ -3667,7 +4453,26 @@
     els.protocolLog.innerHTML = state.logs.length ? state.logs.map((entry) => `<div class="log-row"><time>${entry.time.toLocaleTimeString()}</time><strong>${escapeHTML(entry.type)}</strong><span>${escapeHTML(entry.detail)}</span></div>`).join("") : '<div class="empty-rail">Waiting for OpenCode events…</div>';
   }
 
+  function setWorkspaceRefreshState(busy, message) {
+    for (const id of ["refreshButton", "workspaceRefreshButton"]) {
+      const button = $(`#${id}`);
+      if (!button) continue;
+      button.disabled = busy;
+      button.setAttribute("aria-busy", String(busy));
+      button.setAttribute("aria-label", busy ? "Refreshing workspace" : "Refresh workspace");
+      button.title = busy ? "Refreshing workspace" : "Refresh workspace";
+    }
+    const label = $("#workspaceRefreshButton span");
+    if (label) label.textContent = busy ? "Refreshing…" : "Refresh workspace";
+    const status = $("#workspaceRefreshStatus");
+    if (status) status.textContent = message;
+  }
+
   async function refreshAll(showToast = false) {
+    if (state.refreshingWorkspace) return;
+    state.refreshingWorkspace = true;
+    let refreshMessage = "Refreshing workspace… Tasks keep running.";
+    setWorkspaceRefreshState(true, refreshMessage);
     setConnection("", "Refreshing");
     try {
       const [health, path, sessions, providers, assignments] = await Promise.all([
@@ -3699,8 +4504,10 @@
       connectEvents();
       refreshWorkspaceMeta();
       setConnection("online", "Live");
+      refreshMessage = "Workspace refreshed. Tasks were not interrupted.";
       if (showToast) toast("Workspace refreshed.");
     } catch (error) {
+      refreshMessage = `Refresh could not finish: ${error.message}. Try Refresh workspace again.`;
       if (state.health?.healthy || state.health?.version) {
         setConnection("online", "Display error");
         toast(`Refresh could not finish: ${error.message}`, "error");
@@ -3708,14 +4515,72 @@
         setConnection("error", "Offline");
         toast(`Connection failed: ${error.message}`, "error");
       }
+    } finally {
+      state.refreshingWorkspace = false;
+      setWorkspaceRefreshState(false, refreshMessage);
     }
   }
 
+  function bindVoiceControls() {
+    const voicePanel = $("#voiceOptionsPanel"), voiceButton = $("#voiceButton"), menuButton = $("#voiceMenuButton");
+    const positionVoicePanel = () => {
+      const rect = menuButton.getBoundingClientRect();
+      const width = Math.min(280, innerWidth - 16);
+      voicePanel.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
+      voicePanel.style.bottom = `${Math.max(8, innerHeight - rect.top + 8)}px`;
+      voicePanel.style.maxHeight = `${Math.max(80, rect.top - 16)}px`;
+    };
+    voicePanel.addEventListener("beforetoggle", event => { if (event.newState === "open") { $("#composerOptions").open = false; positionVoicePanel(); } });
+    voiceButton.addEventListener("click", () => {
+      if (voicePanel.matches(":popover-open")) voicePanel.hidePopover();
+      if (els.mic.getAttribute("aria-pressed") === "true") els.mic.click();
+      else els.talk.click();
+    });
+    voiceButton.addEventListener("keydown", event => {
+      if (event.key !== "ArrowDown") return;
+      event.preventDefault(); voicePanel.showPopover(); $("#voiceServiceSelect").focus({ preventScroll: true });
+    });
+    voicePanel.addEventListener("toggle", () => menuButton.setAttribute("aria-expanded", String(voicePanel.matches(":popover-open"))));
+    voicePanel.addEventListener("click", event => { if (event.target.closest("button") && !event.target.closest('#checkNvidiaVoice')) voicePanel.hidePopover(); }, true);
+    window.addEventListener("resize", () => { if (voicePanel.matches(":popover-open")) positionVoicePanel(); });
+    document.querySelectorAll('[data-voice-mute]').forEach(button => button.addEventListener('click', () => {
+      if (button.dataset.voiceMute === 'mic') setVoiceMicMuted(!state.voiceMicMuted);
+      else setVoiceSpeakerMuted(!state.voiceSpeakerMuted);
+    }));
+  }
+
   function bindEvents() {
+    bindConversationLayout();
+    bindVoiceControls();
+    bindCompactNavigation();
+    const toolsPanel = $("#workspaceToolsPanel"), toolsButton = $("#workspaceToolsButton");
+    toolsPanel.addEventListener("toggle", () => toolsButton.setAttribute("aria-expanded", String(toolsPanel.matches(":popover-open"))));
+    toolsPanel.addEventListener("click", event => { if (!toolsPanel.hasAttribute("data-remote-persistent") && event.target.closest("button")) toolsPanel.hidePopover(); }, true);
+    window.addEventListener('seneschal-open-history-session', async event => {
+      const { id, directory } = event.detail || {};
+      if (!id || !/^[a-zA-Z0-9:\-_.]{1,256}$/.test(id)) return;
+      try {
+        if (!state.sessions.some(session => session.id === id)) {
+          const session = await api(`/session/${encodeURIComponent(id)}`, { directory: directory || state.currentDirectory });
+          state.sessions.push(normalizeSession(session));
+        }
+        await selectSession(id);
+      } catch { toast('This historical session is no longer available in the engine.', 'warn'); }
+    });
     $("#leftPanelToggle").addEventListener("click", toggleLeftPanel);
     $("#rightPanelToggle").addEventListener("click", toggleRightPanel);
     $("#themeSwitch").addEventListener("click", toggleTheme);
-    $("#motionSwitch").addEventListener("click", cycleMotion);
+    $("#motionSwitch").setAttribute("aria-label", "Open wallpaper themes");
+    $("#motionSwitch").title = "Wallpaper themes — choose and customize your background";
+    $("#motionSwitch").setAttribute("aria-haspopup", "dialog");
+    $("#motionSwitch").addEventListener("click", openAtmospheres);
+    window.addEventListener("seneschal-atmosphere-change", (event) => {
+      const id = event.detail?.id;
+      if (!motionPresets[id]) return;
+      state.motion = id;
+      $("#motionLabel").textContent = motionPresets[id].short;
+      $("#settingsMotion").textContent = motionPresets[id].label;
+    });
     $("#newSessionButton").addEventListener("click", () => newSession());
     $("#addProjectButton").addEventListener("click", openProjectDialog);
     $("#projectsCollapseButton").addEventListener("click", () => toggleRailSection("projects"));
@@ -3724,6 +4589,7 @@
     els.archivedSessionsButton.addEventListener("click", () => { state.showArchivedSessions = !state.showArchivedSessions; renderSessions(); });
     $("#pinnedMessagesCollapseButton").addEventListener("click", () => toggleRailSection("pins"));
     $("#refreshButton").addEventListener("click", () => refreshAll(true));
+    $("#workspaceRefreshButton").addEventListener("click", () => refreshAll(true));
     $("#commandButton").addEventListener("click", openCommands);
     $("#settingsButton").addEventListener("click", openSettings);
     $("#agentBoardButton").addEventListener("click", openAgentBoard);
@@ -3735,7 +4601,7 @@
     $("#settingsChatGPTButton").addEventListener("click", openChatGPTSpace);
     $("#settingsEngineButton").addEventListener("click", () => openAdvancedSetting("Classic OpenCode opened with the complete engine controls."));
     $("#settingsThemeButton").addEventListener("click", toggleTheme);
-    $("#settingsMotionButton").addEventListener("click", cycleMotion);
+    $("#settingsMotionButton").addEventListener("click", openAtmospheres);
     $("#settingsProvidersButton").addEventListener("click", openProviderSettings);
     $("#settingsBrowserButton").addEventListener("click", openBrowserFromSettings);
     $("#settingsAgentBoardButton").addEventListener("click", openAgentBoard);
@@ -3780,6 +4646,8 @@
     $("#approvalPolicyForm").addEventListener("submit", saveApprovalSettings);
     $("#approvalCancelButton").addEventListener("click", () => els.approvalDialog.close());
     $("#settingsBackupsButton").addEventListener("click", backupNow);
+    $("#backupStatusButton").addEventListener("click", refreshBackupStatus);
+    els.settingsDialog.addEventListener('close', () => clearTimeout(backupStatusTimer));
     $("#launchChatGPTButton").addEventListener("click", launchChatGPT);
     $("#skillsButton").addEventListener("click", () => openInstructionStudio("skills"));
     $("#openInstructionsButton").addEventListener("click", () => openInstructionStudio("persona"));
@@ -3810,15 +4678,15 @@
     $("#installVsCodeCompanionButton").addEventListener("click", installVsCodeCompanion);
     $("#cancelVsCodeButton").addEventListener("click", () => els.vscodeDialog.close());
     $("#homeButton").addEventListener("click", () => {
-      if (innerWidth <= 680) { $(".sidebar").classList.toggle("open"); return; }
+      if (innerWidth <= 680 && !document.body.classList.contains("remote-client")) { $(".sidebar").classList.toggle("open"); return; }
       state.currentSessionID = ""; state.messages = []; storage.set("atelier-session", ""); renderAll();
     });
     els.model.addEventListener("change", () => selectModel(els.model.value));
-    els.modelPickerButton.addEventListener("click", () => { const opening = els.modelPickerMenu.hidden; els.modelPickerMenu.hidden = !opening; els.modelPickerButton.setAttribute("aria-expanded", String(opening)); if (opening) { els.modelSearch.value = ""; renderModelPicker(); requestAnimationFrame(() => els.modelSearch.focus()); } });
-    els.modelSearch.addEventListener("input", () => renderModelPicker(els.modelSearch.value));
-    els.modelPickerGroups.addEventListener("click", (event) => { const option = event.target.closest("[data-model-value]"); if (option) selectModel(option.dataset.modelValue); });
-    document.addEventListener("click", (event) => { if (!els.modelPicker.contains(event.target)) closeModelPicker(); });
-    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !els.modelPickerMenu.hidden) { closeModelPicker(); els.modelPickerButton.focus(); } });
+    bindModelPicker();
+    bindMessageActionMenus();
+    bindToolDisclosures();
+    bindComposerOptions();
+    bindAresAvailability();
     els.modelVariant.addEventListener("change", () => { const model = selectedModel(); if (!model) return; state.selectedVariants[model.value] = els.modelVariant.value; storage.set("atelier-model-variants", state.selectedVariants); });
     els.agent.addEventListener("change", () => { state.selectedAgent = els.agent.value; storage.set("atelier-agent", state.selectedAgent); els.inspectorAgent.textContent = agentDisplayName(state.selectedAgent); renderInspector(); renderInstructionStack(); renderModelCapability(); if (state.selectedAgent === "chat") toast("Chat mode enabled. All tools and system actions are off."); });
     els.form.addEventListener("submit", (event) => { event.preventDefault(); sendPrompt(els.prompt.value); });
@@ -3870,8 +4738,7 @@
     $("#openChatGPTUsageButton").addEventListener("click", openChatGPTUsage);
     $("#settingsChatGPTUsageButton").addEventListener("click", openChatGPTUsage);
     els.projectForm.addEventListener("submit", addProject);
-    $("#openInspectorButton").addEventListener("click", () => els.inspector.classList.add("open"));
-    $("#closeInspectorButton").addEventListener("click", () => els.inspector.classList.remove("open"));
+    bindContextDrawer();
     $("#protocolButton").addEventListener("click", () => { renderProtocol(); els.protocolDialog.showModal(); });
     $("#closeProtocolButton").addEventListener("click", () => els.protocolDialog.close());
     $("#closeInstructionsButton").addEventListener("click", closeInstructionStudio);
@@ -3905,6 +4772,8 @@
     [els.projectDialog, els.settingsDialog, els.archiveDialog, els.providerDialog, els.approvalDialog, els.chatGPTDialog, els.deleteDialog, els.deleteMessageDialog, els.deleteProjectDialog, $("#renameProjectDialog"), els.messageEditDialog, els.browserDialog, els.vscodeDialog, els.agentEditorDialog, els.agentBoardDialog, els.agentBoardHistoryDialog, els.commandDialog, els.protocolDialog].forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
     els.instructionDialog.addEventListener("click", (event) => { if (event.target === els.instructionDialog) closeInstructionStudio(); });
     document.addEventListener("visibilitychange", syncMotionState);
+    document.addEventListener('visibilitychange', () => { if (document.hidden && state.conversationMode && window.SeneschalNvidiaVoice?.selected()) stopConversationMode(false); });
+    window.addEventListener('beforeunload', () => window.SeneschalNvidiaVoice?.stop());
     window.addEventListener("beforeunload", () => { state.speechRecognition?.abort(); state.conversationRecognition?.abort(); window.speechSynthesis?.cancel(); state.mediaStream?.getTracks().forEach((track) => track.stop()); state.eventSource?.close(); clearInterval(state.permissionTimer); clearInterval(state.pulseTimer); stopAgentBoardMonitor(); });
   }
 
@@ -3919,10 +4788,12 @@
     setTalkState();
     syncMotionState();
     bindEvents();
+    window.SeneschalNvidiaVoice?.init({ stopVoice: () => { if (state.conversationMode) stopConversationMode(false); if (state.speechRecognition) state.speechRecognition.abort(); if (state.mediaRecorder) stopMediaRecording(); } });
+    bindConnectionRecovery();
     autoSizePrompt();
     renderPulse();
     state.pulseTimer = setInterval(renderPulse, 2000);
-    requestAnimationFrame(pixelCityLoop);
+    if (!window.SeneschalAtmosphere) requestAnimationFrame(pixelCityLoop);
     await refreshAll();
     state.permissionTimer = setInterval(pollPermissions, 1200);
   }
@@ -3930,128 +4801,2103 @@
   init();
 })();
 
-(() => {
+/* SENESCHAL FEATURE HELP — local copy, no model, audio or network access. */
+(function (root) {
   'use strict';
-  const events = []; let selected = '', paused = false;
-  const dialog = document.createElement('dialog'); dialog.className = 'modal maintenance-modal';
-  dialog.innerHTML = `<div class="modal-kicker">SENESCHAL CONTROL</div><h2 id="maintenanceTitle"></h2><div id="maintenanceBody"></div><div class="modal-actions"><button type="button" class="secondary-button" id="maintenanceClose">Close</button></div>`;
-  dialog.setAttribute('aria-labelledby', 'maintenanceTitle'); document.body.append(dialog);
-  const body = dialog.querySelector('#maintenanceBody');
-  const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  async function request(path, method = 'GET') { const r = await fetch(path, { method, headers: { Accept: 'application/json' } }); if (r.status === 404) throw Error('This running Seneschal service does not support this action yet. Close and reopen Seneschal only; Windows does not need restarting.'); let data; try { data = await r.json(); } catch { throw Error('The service returned an unexpected response. Close and reopen Seneschal only, then retry.'); } if (!r.ok) throw Error(data.error || 'Request failed'); return data; }
-  let opener;
-  function open(title, button) { opener = button; document.querySelector('#settingsDialog').close(); dialog.querySelector('h2').textContent = title; dialog.showModal(); }
-  dialog.querySelector('#maintenanceClose').onclick = () => dialog.close();
-  dialog.onclose = () => { if (opener) { document.querySelector('#settingsDialog').showModal(); opener.focus(); } };
-  const updates = document.querySelector('#settingsUpdatesButton');
-  updates.onclick = () => {
-    open('Seneschal and OpenCode updates', updates);
-    body.innerHTML = '<section><h3>Seneschal application</h3><button type="button" class="secondary-button" id="checkAppUpdate">Check latest Seneschal release</button><div id="appUpdateResult" role="status"></div></section><hr><section><h3>OpenCode engine</h3><p>Checked separately from Seneschal. Updates stay on the installed major version; existing sessions and configuration are preserved.</p><button type="button" class="secondary-button" id="checkEngineUpdate">Check latest OpenCode release</button><div id="engineUpdateResult" role="status"></div></section>';
-    async function checkComponent(engine) {
-      const result = body.querySelector(engine ? '#engineUpdateResult' : '#appUpdateResult');
-      const checker = body.querySelector(engine ? '#checkEngineUpdate' : '#checkAppUpdate');
-      checker.disabled = true; result.textContent = 'Checking installed version and official releases…';
-      try {
-        const info = await request(engine ? '/workspace/engine-updates/check' : '/workspace/updates/check');
-        const allowed = engine ? info.available : info.installable;
-        // A disabled action must explain why it cannot run, not resemble an active update.
-        result.innerHTML = `<p>Installed: <strong>${escape(info.current)}</strong> · Latest ${engine ? 'compatible engine' : 'app'} release: <strong>${escape(info.version)}</strong></p><p>${info.available ? 'Update available.' : 'No newer compatible release found.'} ${escape(info.message || '')}</p>${engine && info.latest !== info.version ? '<p>A newer major version exists but is not selected automatically.</p>' : ''}<button type="button" class="primary-button" ${allowed ? '' : 'disabled'}>${engine ? 'Update OpenCode engine' : 'Update Seneschal'}</button><p class="component-update-status" role="status"></p>`;
-        if (!allowed) result.querySelector('button').textContent = info.available ? 'Update unavailable' : 'No update available';
-        result.querySelector('button').onclick = async event => {
-          if (!confirm('Stop or finish running agent tasks before updating. Proceed with this update?')) return;
-          event.target.disabled = true; checker.disabled = true;
-          const status = result.querySelector('.component-update-status'); status.textContent = 'Downloading and installing…';
-          try { const updated = await request(engine ? '/workspace/engine-updates/install' : '/workspace/updates/install', 'POST'); status.textContent = updated.message; }
-          catch (error) { status.textContent = error.message; event.target.disabled = false; }
-          finally { checker.disabled = false; }
-        };
-      } catch (error) { result.textContent = 'Check failed: ' + error.message; }
-      finally { checker.disabled = false; }
+  // Stable control IDs keep these English strings ready for future language packs.
+  const groups = [
+    ['homeButton', 'Return to the workspace home. On a small screen, open or close the projects sidebar.'],
+    ['interfaceLanguage', 'Choose English or Persian for buttons, settings and help on this browser. This does not translate conversations or change voice and model settings.'],
+    ['modelPickerButton modelSelect', 'Choose the AI model for your next message. Availability and charges depend on its provider.'],
+    ['modelSearchInput', 'Find a model by typing part of its name or provider. This search does not send a message.'],
+    ['commandButton commandInput', 'Find conversations, models and workspace actions in one place. Use Ctrl K to open this search.'],
+    ['refreshButton workspaceRefreshButton', 'Reload workspace information without restarting Seneschal or stopping your tasks.'],
+    ['themeSwitch settingsThemeButton', 'Switch the interface between light and dark colors. Wallpaper scenes are chosen separately.'],
+    ['settingsButton settingsRailButton', 'Open app settings, connections, permissions, updates and other workspace controls.'],
+    ['newSessionButton compactNewSession', 'Start a separate conversation in the selected project. Your other conversations stay saved.'],
+    ['compactProjects', 'Show your project folders in the sidebar. This does not open, move or delete any files.'],
+    ['compactSessions', 'Show the saved conversations for your current project. Nothing is sent or restarted.'],
+    ['compactPermissions', 'Show permission settings. The amber badge means a decision is waiting; this button never approves an action.'],
+    ['compactTools', 'Show tools available to this agent. Opening this section does not run a tool or grant permission.'],
+    ['compactProviders', 'Show model-provider connections. Opening this section does not connect an account or enable billing.'],
+    ['compactPulse', 'Show recent workspace activity. This is not a remaining-credit or billing meter.'],
+    ['leftPanelToggle', 'Hide or restore the projects sidebar to give the conversation more room. Nothing is deleted.'],
+    ['rightPanelToggle', 'Hide or restore Agent Context, including the mascot, tools and permission settings.'],
+    ['addProjectButton confirmProjectButton', 'Add a working folder to Seneschal. The assistant uses that project folder for its tasks.'],
+    ['projectPathInput', 'Enter the folder you want the assistant to work in. Adding it does not copy or move your files.'],
+    ['projectNameInput', 'Change the project label shown in Seneschal. The actual folder name stays the same.'],
+    ['projectsCollapseButton', 'Fold or show the project list. This does not remove any folders.'],
+    ['sessionsCollapseButton', 'Fold or show your conversation list. Saved conversations are kept.'],
+    ['pinnedSessionsCollapseButton', 'Fold or show the conversations you pinned for easy access.'],
+    ['pinnedMessagesCollapseButton', 'Fold or show the messages pinned above this conversation.'],
+    ['archivedSessionsButton settingsArchivesButton', 'Find conversations hidden from the normal list and restore them when needed.'],
+    ['archivedMessagesButton', 'Show messages you archived in this conversation. Archiving is different from deletion.'],
+    ['motionSwitch settingsMotionButton', 'Choose a wallpaper scene, preview it and adjust its motion or brightness. Wallpaper art runs locally.'],
+    ['activityRailButton settingsTrailButton', 'Open recorded conversations, tool activity and usage estimates. History is read from the PC.'],
+    ['workspaceToolsButton', 'Open extra workspace tools, such as Agent Board, instructions and the classic engine interface.'],
+    ['agentBoardButton agentBoardRailButton settingsAgentBoardButton', 'Plan work with several specialist AI sessions. Review their tasks and access before running the board.'],
+    ['agentBoardHistoryRailButton agentBoardHistoryButton', 'Reopen a saved board without automatically rerunning its agents or sending its plan again.'],
+    ['instructionsRailButton openInstructionsButton skillsButton', 'Manage the assistant’s style, project rules, agent roles and reusable skills. These cannot override permissions.'],
+    ['chatGPTRailButton settingsChatGPTButton launchChatGPTButton', 'Open a separate ChatGPT chat. It does not share Seneschal’s task permissions or automatically receive this conversation.'],
+    ['openChatGPTUsageButton settingsChatGPTUsageButton', 'Open the official account-usage page to check remaining allowance. This is separate from provider API billing.'],
+    ['classicButton settingsClassicButton settingsEngineButton', 'Open OpenCode’s full interface for advanced engine and provider settings.'],
+    ['renameSessionButton sessionTitleInput saveSessionTitleButton', 'Rename this conversation so it is easier to find. Its messages and project files are kept.'],
+    ['moveSessionButton moveSessionProject confirmMoveSessionButton', 'Organize this conversation under another project. Its existing working folder and files do not move.'],
+    ['exportSessionButton', 'Save a copy of this conversation. Review it before sharing: it may contain private messages and tool output.'],
+    ['sendSessionToBoardButton', 'Use this conversation as input for Agent Board planning. Review the resulting team before running it.'],
+    ['openSessionVsCodeButton openVsCodeButton settingsVsCodeButton openVsCodeProjectButton', 'Open the current project in Visual Studio Code on the PC.'],
+    ['abortButton composerStopButton', 'Ask the engine to stop the current task. Work already completed is not automatically undone.'],
+    ['deleteSessionButton', 'Review the confirmation for deleting this conversation. Its project files will not be deleted.'],
+    ['confirmDeleteSessionButton', 'Permanently delete this conversation and its message history. Project files are not deleted.'],
+    ['confirmDeleteMessageButton', 'Remove this message from Seneschal on this device. The engine’s source transcript remains unchanged.'],
+    ['confirmDeleteProjectButton', 'Remove the project from Seneschal’s sidebar. Its folder, files and engine conversations are kept.'],
+    ['resumeFollowButton', 'Jump to the newest message. This does not send anything or restart the task.'],
+    ['exitMessageMaximizeButton', 'Return from the enlarged message to the normal workspace layout.'],
+    ['composerMinimizeButton', 'Fold or restore the message input. Your unsent draft is kept.'],
+    ['composerSizeButton', 'Give your draft more writing space, or return the input to its compact size.'],
+    ['promptInput', 'Write a request for the assistant. Enter sends it; Shift Enter adds a new line. Typing alone sends nothing.'],
+    ['fileInput attachFilesButton', 'Attach files to your draft. Their contents may be sent to the selected AI provider when you send the message.'],
+    ['composerOptionsSummary', 'Open extra prompt settings: agent mode, thinking level and skills. This does not send your draft.'],
+    ['agentSelect', 'Choose how the assistant should work: conversation, planning or building. Tool use still follows your permission policy.'],
+    ['modelVariantSelect', 'Choose the model’s thinking effort, if supported. Higher effort may be slower and use more tokens; it does not reveal private internal thinking.'],
+    ['browserButton browserTryButton settingsBrowserButton', 'Prepare a task for the agent’s separate browser. Review the website and instructions before starting.'],
+    ['browserWindowButton browserWindowCardButton', 'Show or hide the agent-controlled browser window on the PC. The browser task can continue while hidden.'],
+    ['aresToggle aresEnabled', 'Show or hide your animated mascot. This alone does not turn on the microphone or change the AI model.'],
+    ['voiceButton talkButton settingsVoiceButton aresTalk', 'Start or stop Talk. Talk sends recognized speech automatically and reads replies using your selected voice service.'],
+    ['voiceMenuButton', 'Choose the voice service and review audio settings. This arrow opens settings; it does not start recording.'],
+    ['voiceServiceSelect', 'Choose Browser voice or NVIDIA cloud speech. This is separate from your chat model. Cloud speech sends audio and reply text off the PC.'],
+    ['nvidiaVoiceConsent', 'Allow audio and reply text to reach NVIDIA’s developer speech service. Trial logging and usage limits may apply; do not use it for secrets.'],
+    ['checkNvidiaVoice', 'Check access to NVIDIA voices. This check does not turn on your microphone or promise unlimited free use.'],
+    ['micButton', 'Dictate into your draft, or record an audio attachment if dictation is unavailable. Review the draft before sending it.'],
+    ['sendButton', 'Send your draft and attachments to the selected AI model. Requests may use provider allowance or incur API charges.'],
+    ['openApprovalButton settingsApprovalButton', 'Choose when tools must ask for permission. Changing the policy is separate from approving an individual action.'],
+    ['approvalSaveButton', 'Save the selected permission policy. This does not approve a tool request already waiting for your decision.'],
+    ['openBlenderButton settingsBlenderButton', 'Open Blender on the PC. Creative actions still follow the assistant’s tool permissions.'],
+    ['protocolButton', 'Inspect connection and tool events for troubleshooting. Logs may contain private project information.'],
+    ['openInspectorButton', 'Open Agent Context: permissions, available tools, integrations and workspace activity.'],
+    ['settingsUpdatesButton', 'Check app and engine updates separately. Reviewing available updates does not install them.'],
+    ['settingsProvidersButton settingsDeepSeekButton', 'Connect an AI provider or manage its credentials. Provider availability, charges and limits are separate from Seneschal.'],
+    ['settingsBudgetButton', 'Review the spending target and provider-side limits. A displayed target is not a guaranteed billing cap.'],
+    ['settingsBackupsButton backupNowButton', 'Create a private backup on the PC. Backups can include sensitive history and should not be shared as ordinary exports.'],
+    ['backupStatusButton', 'Check whether the backup finished successfully. This does not create another backup.'],
+    ['settingsCommandsButton', 'Browse available commands and session references. Selecting an action may prepare or run its specific command.'],
+    ['atmosphereClose', 'Close wallpaper settings and return to the workspace. Your chosen wallpaper is kept.'],
+    ['atmospherePreviewButton', 'Explore the chosen wallpaper in a larger view. This is local artwork, not an AI or microphone session.'],
+    ['atmospherePreviewClose', 'Return from the large wallpaper preview to the wallpaper collection.'],
+    ['atmospherePause atmospherePreviewPause', 'Pause or resume wallpaper motion. This does not pause AI tasks or mute voice.'],
+    ['atmosphereNext atmospherePreviewNext', 'Switch to the next wallpaper world. Your chat and unsent draft stay unchanged.'],
+    ['atmospherePalette', 'Change the selected wallpaper’s color style, or let it follow the day/night theme.'],
+    ['atmosphereWeather', 'Choose the scene’s weather or water movement. Available effects depend on the wallpaper.'],
+    ['atmosphereIntensity', 'Adjust the amount of rain, snow, mist or scene particles.'],
+    ['atmosphereActivity', 'Adjust movement and activity inside the wallpaper, such as passing traffic or scene details.'],
+    ['atmosphereGlow', 'Adjust the wallpaper’s light effects, not your screen’s actual brightness.'],
+    ['atmosphereFeature', 'Show or hide the selected world’s extra scene details.'],
+    ['atmosphereReset', 'Restore this wallpaper’s scene controls to their defaults. Conversations and files are not changed.'],
+    ['atmosphereStrength', 'Set how visible the wallpaper is on the home screen.'],
+    ['atmosphereConversationStrength', 'Set how visible the wallpaper is behind messages. A lower value can make text easier to read.'],
+    ['atmosphereAnimateConversation atmosphereEnableConversation', 'Allow wallpaper animation while chatting. Leaving it off reduces distraction and local graphics work.'],
+    ['atmosphereQuality', 'Limit wallpaper frames per second. A lower setting uses fewer local graphics resources.'],
+    ['atmosphereRotation', 'Automatically change wallpaper worlds at the chosen interval. Rotation waits while the app is paused or hidden.'],
+    ['atmosphereMinutes', 'Choose how long each wallpaper stays before automatic rotation changes it.'],
+    ['atmosphereShuffle', 'Choose wallpaper worlds in a mixed order instead of a fixed sequence.'],
+    ['atmosphereShowHotspots', 'Show hints for interactive details in the wallpaper preview. This does not affect AI tools.'],
+    ['providerConnectSelect', 'Choose the company or service that supplies your AI model.'],
+    ['providerKeyInput', 'Enter the provider’s API key. Keep it secret; this page sends it to the local engine, not into your conversation.'],
+    ['providerAdvancedButton', 'Open advanced provider options for services not listed in this simple connection form.'],
+    ['providerConnectButton', 'Save the provider connection in the local engine. This does not make the provider free or set a spending limit.'],
+    ['personaEditor', 'Set the assistant’s name, tone and style. These instructions do not grant extra tool permissions.'],
+    ['generalEditor', 'Write preferences and rules to use across projects. Review and save your edits when ready.'],
+    ['projectEditor', 'Write rules for this project, such as conventions, testing steps and files to leave alone.'],
+    ['buildAgentEditor planAgentEditor', 'Customize this agent’s instructions. Its allowed tools still depend on the permission policy.'],
+    ['installSkillLinkButton skillLinkInput inspectSkillLinkButton', 'Review a skill from a repository link before installing it. A skill can change instructions, so only use sources you trust.'],
+    ['newSkillButton', 'Create a new reusable instruction skill. Nothing is saved until you choose Save.'],
+    ['skillNameInput', 'Choose a short identifier for this skill so you can find and reuse it.'],
+    ['skillScopeSelect', 'Choose whether the skill belongs to the current project or is available across projects.'],
+    ['skillEditor', 'Edit the skill’s instructions. Do not include passwords or API keys.'],
+    ['archiveSkillButton', 'Archive the selected skill instead of keeping it in the active skill list.'],
+    ['saveSkillButton', 'Save the skill instructions in the chosen scope. Review them before using the skill.'],
+    ['messageEditInput', 'Revise this earlier request. Saving and retrying returns to that point and runs the revised request.'],
+    ['browserUrlInput', 'Enter the website the agent should visit in its separate browser.'],
+    ['browserTaskInput', 'Explain what the agent should do on that website. Avoid including passwords or other secrets.'],
+    ['runBrowserButton', 'Send these browser-task instructions to the assistant. Browser and other tools still follow your permission policy.'],
+    ['agentBoardObjective', 'Describe the result you want the team of agents to deliver.'],
+    ['agentBoardConcurrency', 'Limit how many board agents can work at the same time. More agents may use more provider allowance.'],
+    ['agentBoardImportButton', 'Bring an existing conversation into the board. Review what information will be used.'],
+    ['agentBoardTemplateButton', 'Add a starter team to edit. This alone does not start its agents.'],
+    ['agentBoardAddButton', 'Add a specialist agent with its own task, model and access level.'],
+    ['agentBoardRunButton', 'Start eligible agents on this board. Review their tasks, models, access and dependencies first.'],
+    ['agentBoardPauseButton', 'Pause new agents from starting. Agents already running are stopped separately.'],
+    ['agentBoardResetButton', 'Reset the board’s workflow state. Review any confirmation before discarding its setup.'],
+    ['agentBoardStopButton', 'Ask running board agents to stop. Changes they already made are not automatically reversed.'],
+    ['agentNameInput', 'Give this specialist a name that explains its job, such as Researcher or Reviewer.'],
+    ['agentRoleInput', 'Choose this specialist’s role in the team, such as planner, builder or reviewer.'],
+    ['agentModelInput', 'Choose the AI model used by this specialist. Its provider’s charges and limits apply.'],
+    ['agentAccessInput', 'Choose the tools this specialist may use. Making a tool available is not the same as approving its actions.'],
+    ['agentPromptInput', 'Give this specialist one clear responsibility and describe the expected result.'],
+    ['vscodePathInput', 'Optionally enter the project file to open in Visual Studio Code.'],
+    ['vscodeLineInput vscodeColumnInput', 'Choose where the editor should place the cursor in that file.'],
+    ['installVsCodeCompanionButton', 'Install the optional editor companion on the PC. It adds shortcuts between VS Code and Seneschal.'],
+    ['aresDrag', 'Move the floating mascot by dragging this handle. Arrow keys also move it; Layout provides position controls.'],
+    ['aresMinimize', 'Fold or restore the mascot card. This does not stop Talk or cancel the assistant’s task.'],
+    ['aresMaximize', 'Open or leave the full-screen mascot view. Maximizing alone does not turn on the microphone.'],
+    ['aresClose', 'Hide the mascot and release its 3D resources. Voice and the AI task remain separate.'],
+    ['aresRetry', 'Try loading the local mascot again. This does not resend your message or switch voice services.'],
+    ['aresMotion', 'Pause or resume mascot animation. This does not mute speech or stop the AI task.'],
+    ['aresLayoutButton', 'Adjust mascot position, size and camera angle, or dock it in the sidebar.'],
+    ['aresResize', 'Drag to resize the floating mascot. On narrow cards, use Layout → Larger or Smaller instead.'],
+    ['aresCameraHome aresCameraReset', 'Return the camera to the front of the character without moving the mascot card.'],
+    ['aresDock', 'Place the mascot in the sidebar so it has its own space above the other sections.'],
+    ['aresReset', 'Restore the mascot card’s default position and size. This does not reset your conversation.'],
+    ['settingsPhoneAccessButton', 'Manage private phone access on the PC. The PC must remain awake and connected to serve your phone.'],
+    ['phoneAccessRefresh', 'Refresh the list of paired browsers and their connection status.'],
+    ['phoneAccessCode', 'Enter this one-time pairing code only on your phone. Do not share it or paste it into chat.'],
+    ['checkAppUpdate checkEngineUpdate', 'Check for a compatible release. Checking alone does not install the update or restart your tasks.'],
+    ['activityQuery', 'Search recorded conversations. Choose whether to search titles or conversation text.'],
+    ['activitySearchMode', 'Choose whether the history search checks titles and projects, or the recorded conversation text.'],
+    ['activityStatus', 'Filter by the status saved in history. It may differ from a task’s current live state.'],
+    ['activitySearchSubmit', 'Search the local history using these filters. This does not ask the AI a question.'],
+    ['activityStartup', 'Start the existing history service on future Seneschal launches. This does not enable Windows startup or immediately start the service.']
+  ];
+  const catalog = Object.freeze(Object.fromEntries(groups.flatMap(([ids, copy]) => ids.split(' ').map(id => [id, copy]))));
+  const nativeTitles = new WeakMap();
+  const sections = {
+    permissions: 'Review when the assistant must ask before using tools. A waiting permission request still needs your explicit decision.',
+    tools: 'See which tools the current agent can access. Available does not mean automatically approved.',
+    browser: 'Control the agent’s separate browser session. It does not use your normal saved browser profile.',
+    creative: 'Connect the assistant to Blender on the PC for 3D work. Creative tool actions follow your permissions.',
+    code: 'Open the working project or a file in the PC’s code editor.',
+    budget: 'Review your paid-provider spending target. Set real spending limits with the provider too.',
+    providers: 'See connected AI services and the models they make available.',
+    pulse: 'See recent workspace and engine activity. These activity counts are not your remaining model allowance.'
+  };
+  const panels = {
+    settingsDialog: 'Review app settings, model connections, voice, permissions and PC-only maintenance. Open a specific control to change it.',
+    atmosphereDialog: catalog.motionSwitch, atmospherePreview: catalog.atmospherePreviewButton,
+    approvalDialog: catalog.openApprovalButton, providerDialog: catalog.settingsProvidersButton,
+    projectDialog: catalog.projectPathInput, renameProjectDialog: catalog.projectNameInput,
+    renameSessionDialog: catalog.renameSessionButton, moveSessionDialog: catalog.moveSessionButton,
+    deleteSessionDialog: catalog.confirmDeleteSessionButton, deleteMessageDialog: catalog.confirmDeleteMessageButton,
+    deleteProjectDialog: catalog.confirmDeleteProjectButton, messageEditDialog: catalog.messageEditInput,
+    browserDialog: catalog.browserButton, instructionDialog: catalog.instructionsRailButton,
+    agentBoardDialog: catalog.agentBoardButton, agentBoardHistoryDialog: catalog.agentBoardHistoryButton,
+    agentEditorDialog: 'Set up one specialist’s name, task, model, system access and dependencies before running it.',
+    vscodeDialog: catalog.settingsVsCodeButton, commandDialog: catalog.commandButton,
+    protocolDialog: catalog.protocolButton, aresStage: catalog.aresMaximize,
+    chatGPTDialog: catalog.chatGPTRailButton, archiveDialog: catalog.archivedSessionsButton
+  };
+  const rules = [
+    ['[data-voice-mute="mic"]', node => node.getAttribute('aria-pressed') === 'true' ? 'Unmute the microphone. Talk can then capture and automatically send new spoken turns.' : 'Stop microphone capture without stopping the AI task. Unsent recorded audio is discarded; audio already sent cannot be taken back.'],
+    ['[data-voice-mute="speaker"]', node => node.getAttribute('aria-pressed') === 'true' ? 'Let future replies play aloud again. Old muted replies will not be replayed.' : 'Stop spoken playback and keep future replies text-only until you unmute. The microphone and AI task are separate.'],
+    ['[data-reply="once"]', 'Allow only this waiting tool request. Check the requested command or action first.'],
+    ['[data-reply="always"]', 'Remember approval for matching actions in this conversation. This grants more freedom than Allow once.'],
+    ['[data-reply="reject"]', 'Deny this tool request. The tool is not approved; work already completed is not undone.'],
+    ['[data-check-permission]', 'Check whether the PC received your earlier decision. This does not send the decision again.'],
+    ['input[name="approvalProfile"][value="recommended"]', 'Let safe reads run automatically; ask before edits, commands and external actions. Save to apply this policy.'],
+    ['input[name="approvalProfile"][value="strict"]', 'Ask before reading files as well as other tool actions. This is more cautious but interrupts more often. Save to apply.'],
+    ['input[name="approvalProfile"][value="trusted"]', 'Let Build edit files and run commands without asking. Use only for projects you trust; external actions still ask. Save to apply.'],
+    ['.project-item', 'Open this project’s conversations and use its folder for future work.'],
+    ['.project-rename-button', 'Rename the project’s sidebar label, not its folder on disk.'],
+    ['.project-delete-button', 'Remove this project from the sidebar. Its folder, files and engine conversations are kept.'],
+    ['.session-open-button', 'Open this saved conversation. This does not resend its messages.'],
+    ['.session-pin-button', 'Keep this conversation easy to find at the top, or remove that pin.'],
+    ['.session-archive-button', 'Hide this conversation from the normal list, or restore it. Archiving does not delete its history.'],
+    ['.session-rename-button', 'Rename this saved conversation without changing its messages.'],
+    ['.session-delete-button', 'Request permanent deletion of this conversation. Project files are not deleted.'],
+    ['.message-edit-button,.message-retry-button', 'Return to this request and generate a new response. Later responses leave the active branch; review before retrying.'],
+    ['.message-board-button', 'Use only this selected response to prepare an Agent Board. Review the team before running it.'],
+    ['.message-pin-button', 'Pin this message for easy access, or remove its pin.'],
+    ['.message-archive-button', 'Hide or restore this message in this device’s Seneschal view. The engine transcript is kept.'],
+    ['.message-delete-button', 'Remove this message from Seneschal on this device. The engine’s source transcript stays unchanged.'],
+    ['.message-size-button', 'Fold or expand the message without deleting it or running it again.'],
+    ['.message-maximize-button', 'Give this message the main viewing area, or return to the normal layout.'],
+    ['.message-copy-button,.code-copy-button', 'Copy this text to your clipboard. It does not execute commands or send the text to another service.'],
+    ['.pinned-message-item,.message-map-step,[data-jump-message]', 'Jump to the saved message in this conversation. Nothing is sent or run again.'],
+    ['.tool-summary', 'Expand or collapse the tool’s command and result. Viewing a completed result does not run the tool again.'],
+    ['.reasoning-part > summary', 'Show or hide the brief progress summary supplied by the model. This is not access to private internal thinking.'],
+    ['.message-actions-menu > summary', 'Show actions for this message, such as Copy, Pin and Retry. Choose a specific action to use it.'],
+    ['.chat-agent-activity > summary', 'Show or hide recent progress and tool events for this conversation.'],
+    ['.model-picker-option', 'Use this AI model for future requests. Provider availability, allowance and charges still apply.'],
+    ['.quick-card', 'Put this example request in the message input so you can review or edit it before sending.'],
+    ['[data-remove]', 'Remove this attachment from the draft. The original file on disk is not deleted.'],
+    ['[data-save-instruction]', 'Save these instructions for the chosen scope. Instructions cannot grant extra tool permissions.'],
+    ['[data-undo-instruction]', 'Discard unsaved edits in this instruction editor and return to the saved version.'],
+    ['[data-default-instruction]', 'Load the suggested default text into this editor. Review it before saving.'],
+    ['[data-skill-toggle]', 'Include or exclude this skill’s instructions in future requests. Skills cannot grant extra tool permissions.'],
+    ['[data-skill-key]', 'Open this skill to review or edit its instructions before using it.'],
+    ['[data-instruction-tab]', 'Open this part of Instructions Studio. Switching tabs alone does not save your edits.'],
+    ['[data-restore-session]', 'Return this archived conversation to the normal sidebar list.'],
+    ['[data-ares-move]', 'Move the floating mascot a small step in this direction. This does not rotate the character.'],
+    ['[data-ares-size]', 'Make the floating mascot card larger or smaller without changing your conversation.'],
+    ['[data-ares-orbit]', 'Rotate the camera around the mascot. The card itself stays in place.'],
+    ['[data-world]', 'Choose this wallpaper world. Your conversation and unsent draft are not changed.'],
+    ['.atmosphere-actions button,.atmosphere-preview .atmosphere-actions button', 'Play this small scene interaction in the local wallpaper. It does not run an AI tool or record audio.'],
+    ['.atmosphere-hotspot', 'Play the wallpaper interaction at this highlighted detail. It is a local visual effect, not an AI task.'],
+    ['[data-board-edit]', 'Edit this board agent’s task, model and access. Stop a running agent before editing.'],
+    ['[data-board-delete]', 'Remove this agent card from the board. Running work must be stopped separately.'],
+    ['[data-board-run]', 'Start this specialist’s assigned task with its selected model and access.'],
+    ['[data-board-stop]', 'Ask this specialist to stop. Its completed changes are not automatically undone.'],
+    ['[data-board-open]', 'Open this specialist’s conversation. This does not run it again.'],
+    ['[data-board-activity]', 'Inspect this specialist’s recorded progress and tool activity.'],
+    ['[data-board-open-history]', 'Reopen this saved board without rerunning its agents.'],
+    ['[data-board-history-delete]', 'Remove this saved board from board history. Review the confirmation before deleting it.'],
+    ['.command-result', 'Choose this search result. Models, conversations and actions have different effects, shown in the result’s label.'],
+    ['.remote-navigation-toggle', 'Open or close the phone’s projects sidebar.'],
+    ['.remote-sidebar-close,.remote-workspace-tools-close', 'Close this navigation panel and return to the conversation.'],
+    ['.remote-host-bar button', 'Disconnect this browser from private phone access. This does not stop tasks running on the PC.'],
+    ['.tool-chip', 'An available tool for this agent. Tool actions still follow the permission policy.'],
+    ['.activity-chat-heading button', 'Open the recorded history for this conversation. This does not resend a message or rerun its tools.'],
+    ['.agent-dependency-list input', 'Wait for this selected agent to finish before starting the specialist you are editing.'],
+    ['.connection-pill', 'Shows whether this page is connected to the PC’s task engine.'],
+    ['.status-chip', 'Shows whether this conversation is idle, working or retrying.'],
+    ['.usage-card', 'Shows how much of this conversation’s context window is in use, not your account’s remaining allowance.'],
+    ['.permission-kicker', 'A tool is asking for permission. Review the requested action before choosing Allow once, Always or Reject.'],
+    ['#questionDock', 'The assistant needs an answer to a question. Answering a question is different from approving a tool action.']
+  ];
+  function describe(node) {
+    if (!node?.matches) return '';
+    if (node.matches('label')) { const input = node.control || node.querySelector('input,select,textarea'); return input ? describe(input) : ''; }
+    let copy = catalog[node.id] || '';
+    if (!copy) for (const [selector, value] of rules) if (node.matches(selector)) { copy = typeof value === 'function' ? value(node) : value; break; }
+    const label = (root.SeneschalI18n?.sourceLabel(node) || node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!copy && node.matches('button') && (/^(close|cancel|keep\b|×$|back\b)/i.test(label) || /^(close|cancel|maintenanceClose)/i.test(node.id))) copy = 'Close this panel without confirming its pending action. Changes already saved are not undone.';
+    if (!copy && node.matches('.inspector-section-toggle,.block-title,.inspector-head')) copy = sections[node.closest('[data-inspector-section]')?.dataset.inspectorSection] || 'Agent Context shows the current assistant, its permissions, tools and connected services.';
+    if (!copy && node.matches('.rail-heading')) copy = node.closest('#projectsRailSection') ? 'Choose the folder the assistant should work in. Project files stay on your PC.' : node.closest('#pinnedSessionsRailSection') ? 'Conversations you pinned for quick access. Pinning does not copy or rerun them.' : 'Your saved conversations for this project. Open one to continue where you left off.';
+    if (!copy && node.matches('#composerProject,.composer-topline')) copy = 'The working project for this draft, plus controls for the size of the message input.';
+    if (!copy && node.matches('#sessionHeader > div:first-child')) copy = 'The current project and conversation name. This is separate from the AI model selected above.';
+    if (!copy && node.closest('.phone-access-modal')) {
+      const action = node.dataset.action;
+      copy = ({ start: 'Start private phone access on the PC. The PC must stay awake and connected; this is not a public internet link.', stop: 'Stop phone access and revoke all paired browsers and unused codes. PC tasks and history stay intact.', pair: 'Create a one-time code to pair your own browser. Keep this code private.' })[action] || (node.matches('button') && /revoke/i.test(label) ? 'Revoke this paired browser’s access. It must pair again before it can reconnect.' : 'Manage which of your browsers may reach this PC through private phone access.');
     }
-    body.querySelector('#checkAppUpdate').onclick = () => checkComponent(false);
-    body.querySelector('#checkEngineUpdate').onclick = () => checkComponent(true);
-    checkComponent(false); checkComponent(true);
-  };
-  const activity = document.querySelector('#settingsTrailButton');
-  activity.onclick = () => {
-    open('Agent activity', activity);
-    body.innerHTML = `<p>Live events received since this app window opened. Expand an event for its tool arguments, results, status, or reported reasoning summary. This is not hidden model reasoning.</p><div class="activity-controls"><label>Session <select id="activitySession"><option value="">All sessions</option></select></label><button type="button" class="secondary-button" id="activityPause">Pause view</button><button type="button" class="secondary-button" id="activityExport">Export captured events</button></div><details><summary>Agent Trail — persistent session dashboard</summary><p>Optional third-party local dashboard by camtrik. First launch installs @camtrik/agent-trail 0.1.7 in WSL (requires Node 22+ and internet). It reads local session history and creates its own index. Your records are not uploaded by this integration.</p><button type="button" id="launchTrail" class="primary-button">Install / open Agent Trail</button><p role="status" id="trailStatus"></p><a href="http://localhost:3030" target="_blank" rel="noopener noreferrer">Open dashboard after it starts</a></details><p role="status" id="activityCount"></p><div id="activityEvents" class="activity-events"></div>`;
-    const select = body.querySelector('#activitySession'); selected = ''; paused = false;
-    select.onchange = () => { selected = select.value; render(); };
-    body.querySelector('#activityPause').onclick = event => { paused = !paused; event.target.textContent = paused ? 'Resume view' : 'Pause view'; if (!paused) render(); };
-    body.querySelector('#activityExport').onclick = () => { const url = URL.createObjectURL(new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = 'seneschal-activity.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
-    body.querySelector('#launchTrail').onclick = async event => { event.target.disabled = true; const status = body.querySelector('#trailStatus'); status.textContent = 'Starting Agent Trail; first installation may take a few minutes…'; try { const result = await request('/workspace/agent-trail/start', 'POST'); status.textContent = result.message; } catch (error) { status.textContent = error.message; } finally { event.target.disabled = false; } };
-    render();
-  };
-  function session(event) { const p = event.payload.properties || {}; return p.sessionID || p.part?.sessionID || p.info?.sessionID || (event.payload.type?.startsWith('session.') ? p.info?.id : '') || ''; }
-  function render() {
-    if (!dialog.open || !body.querySelector('#activityEvents') || paused) return;
-    const select = body.querySelector('#activitySession'); const ids = [...new Set(events.map(session).filter(Boolean))];
-    for (const id of ids) if (![...select.options].some(o => o.value === id)) { const option = document.createElement('option'); option.value = option.textContent = id; select.append(option); }
-    const visible = events.filter(event => !selected || session(event) === selected).slice(-150).reverse();
-    body.querySelector('#activityCount').textContent = `${events.length} events captured (latest 150 shown). ${paused ? 'View paused.' : 'Live.'}`;
-    const container = body.querySelector('#activityEvents'); const expanded = new Set([...container.querySelectorAll('details[open]')].map(d => d.dataset.id));
-    if (container.contains(document.activeElement)) return;
-    container.innerHTML = visible.map(event => `<details data-id="${event.id}" ${expanded.has(String(event.id)) ? 'open' : ''}><summary><time>${escape(event.time)}</time> <strong>${escape(event.payload.type || 'event')}</strong> <small>${escape(session(event))}</small></summary><pre>${escape(JSON.stringify(event.payload.properties || event.payload, null, 2))}</pre></details>`).join('') || '<p>No activity yet. Run an agent task to see its events here.</p>';
+    if (!copy && node.closest('.activity-workspace,.chat-agent-activity')) {
+      const action = node.dataset.action, view = node.dataset.view;
+      copy = ({ overview: 'See a summary of recorded conversations and estimated usage.', sessions: 'Find and inspect recorded conversations without rerunning them.', usage: 'Review recorded token usage and cost estimates. Estimates are not your provider’s final bill.', service: 'Manage the local history service and its derived index on the PC.' })[view]
+        || ({ refresh: 'Reload recorded history and status without resending messages.', start: 'Start the local history service on the PC so the dashboard can read its records.', stop: 'Stop the history service, not the AI’s current task. Saved conversations are kept.', restart: 'Restart the local history service. This is separate from restarting the task engine.', rebuild: 'Rebuild the history index from original records. The previous index is preserved as a local backup.', 'save-startup': 'Save whether history should start on future Seneschal launches. This does not immediately start it.', 'export-live': 'Save the live events shown in this window. Review the file before sharing it.', pause: 'Pause or resume updates in this history view. The AI task continues.', current: 'Inspect this chat’s recorded activity without sending a new request.', 'check-host': 'Check whether the PC’s history service is ready. This does not start a paid service.', 'open-chat': 'Open the original conversation so you can continue it.', previous: 'Show the previous page of history.', next: 'Show the next page of history.', 'more-turns': 'Load more recorded turns from this conversation.', 'clear-project': 'Remove the project filter from this history search.' })[action]
+        || (node.hasAttribute('data-session') ? 'Inspect this recorded conversation. Viewing history does not run its tasks again.' : 'Inspect recorded work and usage from the PC. Original conversation records stay separate from this dashboard.');
+    }
+    if (!copy && node.closest('.question-dialog,#questionDock')) {
+      copy = /Refresh questions/i.test(label) ? 'Check for waiting questions. This does not send an answer or approve a tool.' : /Dismiss question/i.test(label) ? 'Reject this question request without choosing an answer. This is not a tool-permission decision.' : /Send answers/i.test(label) ? 'Send only the answers you selected or wrote for this question.' : /Answer question/i.test(label) ? 'Open the waiting question so you can review its choices.' : 'Choose or write an answer for the assistant. Only Send answers submits it; closing keeps it pending.';
+    }
+    if (!copy && node.matches('.atmosphere-controls legend')) copy = node.closest('#atmosphereSceneControls') ? 'Adjust this world’s colors, weather, lights and moving details. These are local visual effects.' : /rotation/i.test(label) ? 'Set an automatic wallpaper playlist. It waits when the workspace is hidden, paused or using a quiet conversation background.' : 'Adjust wallpaper visibility and motion so the background stays comfortable while you work.';
+    if (!copy && node.matches('.atmosphere-group h3')) copy = 'Choose a wallpaper from this collection. The art runs locally and does not use your AI allowance.';
+    if (!copy && node.matches('dialog h2,dialog h3,.modal-kicker,.panel-heading,legend')) copy = panels[node.closest('dialog')?.id] || 'Review this group of settings. Hover or focus a specific control to learn what it changes.';
+    if (!copy && node.matches('summary')) copy = 'Expand or fold these details. This alone does not send a message or approve a tool.';
+    if (!copy && node.matches('a[href]')) copy = 'Open this link. External websites have their own privacy policies; review private information before sharing it.';
+    if (!copy && node.matches('button') && (/^(close|cancel|keep\b|×$|back\b)/i.test(label) || /^(close|cancel|maintenanceClose)/i.test(node.id))) copy = 'Close this panel without confirming its pending action. Changes already saved are not undone.';
+    if (!copy && node.matches('button') && node.getAttribute('value') === 'cancel') copy = 'Leave this dialog without confirming its pending action.';
+    if (!copy && node.matches('button[type="submit"]')) {
+      const form = node.closest('form')?.id;
+      copy = ({ messageEditForm: 'Save this revised request and generate a new response from this point. Later responses leave the active branch.', agentEditorForm: 'Save this specialist’s task, model and access. Saving does not run it.', vscodeForm: 'Open the chosen file and position in Visual Studio Code on the PC.', renameProjectForm: 'Save this sidebar label without renaming the actual folder.' })[form] || 'Save the settings in this form. Review the values before confirming.';
+    }
+    if (!copy && node.closest('.maintenance-modal')) copy = /update/i.test(label) ? 'Install the selected compatible update only after reviewing it. A running task may need to finish first.' : 'Review local app maintenance and compatibility information.';
+    if (!copy && node.matches('input,select,textarea')) copy = 'Change this field’s setting. Its label and nearby note explain the expected value; typing alone does not send a chat message.';
+    if (!copy && node.matches('button')) copy = node.getAttribute('title') || nativeTitles.get(node) || 'Use this action in the current panel. Review the nearby information before confirming a change.';
+    if (copy && node.matches(':disabled,[aria-disabled="true"]')) copy += ' Unavailable right now; check the nearby status.';
+    return root.SeneschalI18n?.t(copy) || copy;
   }
-const tools = document.querySelector('.composer-tools');
-  const mic = document.querySelector('#micButton');
-  mic.querySelector('span').textContent = 'Voice';
-  mic.title = 'Dictate a prompt';
-  const voiceGroup = document.createElement('div'); voiceGroup.className = 'composer-voice-group';
-  mic.before(voiceGroup); voiceGroup.append(mic);
-  const voiceModes = document.createElement('details'); voiceModes.className = 'composer-dropdown';
-  voiceModes.innerHTML = '<summary aria-label="Voice options" title="Voice options">▾</summary><div class="composer-option-panel"><p>Conversation mode</p></div>';
-  voiceModes.querySelector('div').append(document.querySelector('#talkButton'));
-  voiceGroup.append(voiceModes);
-  const more = document.createElement('details'); more.className = 'composer-dropdown composer-more';
-  more.innerHTML = '<summary>More options</summary><div class="composer-option-panel"></div>';
-  for (const label of [...tools.querySelectorAll('.select-wrap')]) more.querySelector('div').append(label);
-  tools.append(more);
-  document.querySelector('.browser-compose-group').hidden = true;
-  document.querySelector('#modelCapability').hidden = true;
-  const collapsePrompt = document.querySelector('#composerMinimizeButton');
-  collapsePrompt.hidden = false;
-  collapsePrompt.textContent = '⌄';
-  collapsePrompt.title = 'Collapse prompt for reading';
-  collapsePrompt.setAttribute('aria-expanded', 'true');
-  collapsePrompt.setAttribute('aria-controls', 'promptInput');
-  const chatActivity = document.createElement('details');
-  chatActivity.className = 'chat-agent-activity';
-  chatActivity.innerHTML = '<summary>Live agent activity</summary><p>Provider-reported progress and tools—not private model reasoning.</p><button type="button" class="secondary-button">Open Agent Trail dashboard</button><div class="chat-activity-list"></div>';
-  document.querySelector('#attachmentStrip').after(chatActivity);
-  let currentChat = localStorage.getItem('atelier-session') || '';
-  const dashboard = document.createElement('dialog');
-  dashboard.className = 'modal maintenance-modal trail-dashboard-modal';
-  dashboard.setAttribute('aria-label', 'Agent Trail dashboard');
-  dashboard.innerHTML = '<h2>Agent Trail dashboard</h2><p role="status"></p><div class="trail-frame-host"></div><div class="modal-actions"><a href="http://localhost:3030/all/dashboard" target="_blank" rel="noopener noreferrer">Open in separate window</a><button type="button" class="secondary-button">Close</button></div>';
-  document.body.append(dashboard);
-  let dashboardOpener;
-  dashboard.querySelector('button').onclick = () => dashboard.close();
-  dashboard.onclose = () => { dashboard.querySelector('.trail-frame-host').replaceChildren(); dashboardOpener?.focus(); };
-  chatActivity.querySelector('button').onclick = async event => {
-    dashboardOpener = event.currentTarget; dashboard.showModal();
-    const status = dashboard.querySelector('[role="status"]'); status.textContent = 'Starting local dashboard…';
-    try {
-      await request('/workspace/agent-trail/start', 'POST');
-      if (!dashboard.open) return;
-      const frame = document.createElement('iframe'); frame.title = 'Local Agent Trail dashboard'; frame.src = 'http://localhost:3030/all/dashboard'; frame.referrerPolicy = 'no-referrer';
-      dashboard.querySelector('.trail-frame-host').replaceChildren(frame);
-      status.textContent = 'Read-only local dashboard. If embedding is blocked, use Open in separate window.';
-    } catch (error) { status.textContent = error.message; }
-  };
-  function renderChatActivity() {
-    const rows = events.filter(event => currentChat && session(event) === currentChat && !event.payload.type?.includes('heartbeat')).slice(-6).reverse();
-    chatActivity.querySelector('.chat-activity-list').innerHTML = rows.map(event => {
-      const props = event.payload.properties || {}; const part = props.part || {};
-      const label = part.type === 'reasoning' ? 'Reported reasoning summary' : part.type === 'tool' ? 'Tool: ' + (part.tool || 'tool') + ' · ' + (part.state?.status || 'running') : event.payload.type || 'Progress';
-      const text = part.text || part.state?.title || props.status?.type || '';
-      return '<details><summary>' + escape(event.time + ' · ' + label) + '</summary><p>' + escape(String(text).slice(-1400)) + '</p><pre>' + escape(JSON.stringify(props, null, 2)) + '</pre></details>';
-    }).join('') || '<p>No live activity captured for this chat yet. Start a task to see updates.</p>';
+  const selector = 'button,summary,input:not([type="hidden"]),select,textarea,a[href],label,.block-title,.rail-heading,.inspector-head,.composer-topline,#composerProject,#sessionHeader > div:first-child,.tool-chip,.status-chip,.connection-pill,.usage-card,.permission-kicker,#questionDock,.modal-kicker,.panel-heading,.activity-view-heading h3,.atmosphere-group h3,dialog h2,dialog h3,legend';
+  function install(doc = root.document) {
+    if (!doc || doc.documentElement.dataset.featureHelpReady === 'true') return null;
+    doc.documentElement.dataset.featureHelpReady = 'true';
+    const bubble = doc.createElement('div'); bubble.id = 'seneschalFeatureHelp'; bubble.className = 'feature-help-tooltip'; bubble.setAttribute('role', 'tooltip'); bubble.setAttribute('popover', 'manual'); bubble.hidden = true;
+    let current = null, timer = 0, focusTimer = 0, closeTimer = 0, frame = 0, press = null, blocked = null, mode = '', disposed = false, pointerFocus = false, focusRecovery = null;
+    const cleanup = [];
+    const on = (target, type, fn, options) => { target.addEventListener(type, fn, options); cleanup.push(() => target.removeEventListener(type, fn, options)); };
+    const target = event => { const node = event.target?.closest?.(selector); return node && !bubble.contains(node) && describe(node) ? node : null; };
+    function unlink() {
+      if (!current) return;
+      const ids = (current.getAttribute('aria-describedby') || '').split(/\s+/).filter(id => id && id !== bubble.id);
+      if (ids.length) current.setAttribute('aria-describedby', ids.join(' ')); else current.removeAttribute('aria-describedby');
+    }
+    function hide() {
+      root.clearTimeout(timer); root.clearTimeout(focusTimer); root.clearTimeout(closeTimer); root.cancelAnimationFrame(frame); timer = focusTimer = closeTimer = frame = 0;
+      unlink(); current = null; mode = ''; focusRecovery = null;
+      if (bubble.matches(':popover-open')) bubble.hidePopover(); bubble.hidden = true;
+    }
+    function show(node, nextMode) {
+      if (disposed || !node?.isConnected || !node.getClientRects().length) return;
+      hide(); current = node; mode = nextMode;
+      const copy = describe(node); if (!copy) { hide(); return; }
+      if (node.hasAttribute('title')) { nativeTitles.set(node, node.getAttribute('title')); node.removeAttribute('title'); }
+      bubble.textContent = copy;
+      const layer = node.closest('dialog[open],[popover]:popover-open') || doc.body;
+      layer.append(bubble); bubble.hidden = false; bubble.style.visibility = 'hidden';
+      bubble.style.maxWidth = `${Math.min(310, Math.max(40, (root.visualViewport?.width || root.innerWidth) - 16))}px`;
+      bubble.style.maxHeight = `${Math.min(190, Math.max(40, (root.visualViewport?.height || root.innerHeight) - 16))}px`;
+      const ids = new Set((node.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean)); ids.add(bubble.id); node.setAttribute('aria-describedby', [...ids].join(' '));
+      frame = root.requestAnimationFrame(() => {
+        frame = 0; if (!current || bubble.hidden) return;
+        // A native dialog/popover may still be opening when it focuses a control.
+        // Open our nested, non-focus-taking layer only after that operation ends.
+        const readyLayer = current.closest('dialog[open],[popover]:popover-open') || doc.body;
+        if (bubble.parentElement !== readyLayer) readyLayer.append(bubble);
+        if (typeof bubble.showPopover === 'function' && !bubble.matches(':popover-open')) bubble.showPopover();
+        const viewport = root.visualViewport, left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0, width = viewport?.width || root.innerWidth, height = viewport?.height || root.innerHeight;
+        const anchor = current.getBoundingClientRect(), rect = bubble.getBoundingClientRect();
+        let x = Math.max(left + 8, Math.min(anchor.left + anchor.width / 2 - rect.width / 2, left + width - rect.width - 8));
+        const below = anchor.bottom + 8;
+        let y = below + rect.height <= top + height - 8 ? below : Math.max(top + 8, anchor.top - rect.height - 8);
+        const compactToggle = current.matches('.panel-toggle') && current.closest('.left-panel-collapsed > .sidebar, .right-panel-collapsed .inspector');
+        const compactRail = compactToggle || current.closest('.compact-nav') || (current.parentElement?.classList.contains('sidebar-footer') && current.closest('.left-panel-collapsed'));
+        if (compactRail) {
+          const rightRail = current.closest('.compact-context-nav') || (compactToggle && current.closest('.inspector'));
+          const beside = rightRail ? anchor.left - rect.width - 10 : anchor.right + 10;
+          x = Math.max(left + 8, Math.min(beside, left + width - rect.width - 8));
+          y = Math.max(top + 8, Math.min(anchor.top + (anchor.height - rect.height) / 2, top + height - rect.height - 8));
+        }
+        bubble.style.left = `${Math.round(x)}px`; bubble.style.top = `${Math.round(y)}px`; bubble.style.visibility = 'visible';
+      });
+    }
+    function cancelPress() { if (press) root.clearTimeout(press.timer); press = null; }
+    on(doc, 'pointerover', event => {
+      if (event.pointerType === 'touch' || event.pointerType === 'pen') return;
+      if (bubble.contains(event.target)) { root.clearTimeout(closeTimer); return; }
+      const node = target(event); if (!node || node.contains(event.relatedTarget)) return;
+      root.clearTimeout(timer); timer = root.setTimeout(() => show(node, 'hover'), 400);
+    }, true);
+    on(doc, 'pointerout', event => {
+      const node = target(event); if (node?.contains(event.relatedTarget) || bubble.contains(event.relatedTarget)) return;
+      root.clearTimeout(timer);
+      if (mode === 'hover' && (!current || !current.contains(doc.activeElement))) closeTimer = root.setTimeout(hide, 160);
+    }, true);
+    on(bubble, 'pointerenter', () => root.clearTimeout(closeTimer));
+    on(bubble, 'pointerleave', () => { if (mode === 'hover' && !current?.contains(doc.activeElement)) closeTimer = root.setTimeout(hide, 160); });
+    on(doc, 'focusin', event => { if (pointerFocus) return; const node = target(event); if (node) show(node, 'focus'); else if (!bubble.contains(event.target)) hide(); }, true);
+    on(doc, 'focusout', event => { if (current?.contains(event.target) && !current.contains(event.relatedTarget) && !bubble.contains(event.relatedTarget)) hide(); }, true);
+    on(doc, 'pointerdown', event => {
+      if (bubble.contains(event.target)) return;
+      pointerFocus = true;
+      blocked = null;
+      hide(); cancelPress();
+      if (!['touch', 'pen'].includes(event.pointerType) || event.isPrimary === false || (event.button !== undefined && event.button !== 0)) return;
+      const node = target(event);
+      // Preserve native text selection, sliders, camera/drag gestures and link menus.
+      if (!node || node.matches('input:not([type="checkbox"]):not([type="radio"]),select,textarea,a[href],.ares-drag,.ares-resize') || event.target.closest('[contenteditable="true"],.ares-canvas')) return;
+      const pending = press = { node, id: event.pointerId, x: event.clientX, y: event.clientY, shown: false };
+      pending.timer = root.setTimeout(() => { if (press !== pending) return; pending.shown = true; show(node, 'hold'); }, 550);
+    }, true);
+    on(doc, 'pointermove', event => {
+      if (!press) return;
+      if (event.pointerId !== press.id || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) { if (press.shown) hide(); cancelPress(); }
+    }, { capture: true, passive: true });
+    on(doc, 'pointerup', event => {
+      root.setTimeout(() => { pointerFocus = false; }, 0);
+      if (!press || event.pointerId !== press.id) return;
+      if (press.shown) { blocked = { node: press.node, until: Date.now() + 1200 }; event.preventDefault(); }
+      cancelPress();
+    }, true);
+    on(doc, 'pointercancel', () => { if (press?.shown) blocked = { node: press.node, until: Date.now() + 1200 }; cancelPress(); if (mode === 'hold') hide(); }, true);
+    on(doc, 'contextmenu', event => { if (press && press.node.contains(event.target)) event.preventDefault(); }, true);
+    on(doc, 'click', event => {
+      if (blocked && Date.now() <= blocked.until && blocked.node.contains(event.target) && event.detail !== 0) {
+        blocked = null; event.preventDefault(); event.stopImmediatePropagation(); return;
+      }
+      blocked = null; if (!bubble.contains(event.target)) hide();
+    }, true);
+    on(doc, 'keydown', event => {
+      pointerFocus = false;
+      if (event.key === 'Escape' && current) { event.preventDefault(); event.stopImmediatePropagation(); hide(); cancelPress(); }
+      else if (['Enter', ' ', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) { cancelPress(); if (event.key !== 'Tab') hide(); }
+    }, true);
+    on(doc, 'scroll', event => {
+      if (bubble.contains(event.target)) return;
+      const focused = mode === 'focus' ? current : focusRecovery;
+      hide(); cancelPress();
+      if (!pointerFocus && focused?.contains(doc.activeElement)) {
+        focusRecovery = focused;
+        focusTimer = root.setTimeout(() => { if (focused.contains(doc.activeElement)) show(focused, 'focus'); }, 120);
+      }
+    }, { capture: true, passive: true });
+    on(root, 'resize', () => { hide(); cancelPress(); });
+    on(root, 'seneschal:languagechange', () => { hide(); cancelPress(); });
+    on(root, 'blur', () => { hide(); cancelPress(); });
+    on(root.visualViewport || root, 'resize', hide);
+    on(doc, 'visibilitychange', () => { if (doc.hidden) { hide(); cancelPress(); } });
+    on(doc, 'input', () => { hide(); cancelPress(); }, true);
+    const observer = new root.MutationObserver(records => {
+      if (current && (!current.isConnected || records.some(record => {
+        if (record.target === current && record.attributeName === 'title' && !current.hasAttribute('title')) return false;
+        if (record.target === current) return true;
+        if (!record.target.contains?.(current)) return false;
+        return record.attributeName === 'class' || (record.attributeName === 'hidden' && record.target.hidden) || (record.attributeName === 'open' && !record.target.open);
+      }))) hide();
+      if (press && !press.node.isConnected) cancelPress();
+    });
+    observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'open', 'class', 'disabled', 'aria-pressed', 'aria-label', 'title'] });
+    const dispose = () => { if (disposed) return; disposed = true; hide(); cancelPress(); observer.disconnect(); cleanup.forEach(fn => fn()); bubble.remove(); delete doc.documentElement.dataset.featureHelpReady; };
+    on(root, 'pagehide', event => { if (!event.persisted) dispose(); });
+    return { hide, dispose, describe, tooltip: bubble };
   }
-  window.addEventListener('seneschal-session-selected', event => { currentChat = event.detail || ''; renderChatActivity(); });
-  window.addEventListener('seneschal-activity', () => { setTimeout(renderChatActivity, 0); });
-  renderChatActivity();
-  let sequence = 0, pending = false;
-  window.addEventListener('seneschal-activity', event => { events.push({ id: ++sequence, time: new Date().toLocaleTimeString(), payload: JSON.parse(JSON.stringify(event.detail, (key, value) => typeof value === 'string' && value.length > 16384 ? value.slice(0, 16384) + '\n[Preview truncated; full record is in OpenCode / Agent Trail]' : value)) }); if (events.length > 1000) events.shift(); if (!pending) { pending = true; setTimeout(() => { pending = false; render(); }, 500); } });
-})();
+  root.SeneschalFeatureHelp = { catalog, sections, rules, describe, install };
+  if (root.document) install(root.document);
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* SENESCHAL LOCAL LANGUAGES — authored UI only; never translate user content. */
+(function (root) {
+  'use strict';
+  const translations = Object.create(null);
+  const folded = Object.create(null);
+  function register(rows) {
+    for (const row of rows.trim().split('\n')) {
+      const separator = row.indexOf('|');
+      if (separator > 0) { const key = row.slice(0, separator), copy = row.slice(separator + 1); translations[key] = copy; folded[key.toLowerCase()] = copy; }
+    }
+  }
+  /* LANGUAGE COPY */
+  register(`
+Your Private AI Atelier|کارگاه خصوصی هوش مصنوعی شما
+Select model|انتخاب مدل
+No matching models|مدلی پیدا نشد
+Connecting|در حال اتصال
+Search sessions, models, actions…|جست‌وجوی گفت‌وگو، مدل و ابزار…
+Search sessions, models, or actions…|جست‌وجوی گفت‌وگو، مدل یا ابزار…
+Night|شب
+Day|روز
+Normal view|نمای معمولی
+New session|گفت‌وگوی جدید
+Projects|پروژه‌ها
+Pinned sessions|گفت‌وگوهای سنجاق‌شده
+Sessions|گفت‌وگوها
+Wallpapers|پس‌زمینه‌ها
+Orbit|مدار
+Activity|فعالیت‌ها
+Local|محلی
+Workspace tools|ابزارهای فضای کار
+Refresh workspace|تازه‌سازی فضای کار
+Boards & conversations|تابلوها و گفت‌وگوها
+Agent Board|تابلوی عامل‌ها
+Board history|تاریخچهٔ تابلوها
+Instructions|دستورالعمل‌ها
+ChatGPT Chat|گفت‌وگوی ChatGPT
+Chat|گفت‌وگو
+Account allowance|سهمیهٔ حساب
+Plus agent usage|مصرف عامل در Plus
+View remaining allowance|مشاهدهٔ سهمیهٔ باقی‌مانده
+Official 5-hour and weekly limits|محدودیت رسمی پنج‌ساعته و هفتگی
+Classic OpenCode|رابط اصلی OpenCode
+Context usage|مصرف ظرفیت گفت‌وگو
+Ready for a new session|آمادهٔ گفت‌وگوی جدید
+Settings|تنظیمات
+Project|پروژه
+Idle|آماده
+Your private AI Seneschal|Seneschal، دستیار خصوصی شما
+Night Studio|کارگاه شبانه
+Day Atelier|کارگاه روزانه
+At your command, My Lord.|در خدمت شما هستم.
+Analyze project|بررسی پروژه
+Map structure and identify risks|شناخت ساختار و پیدا کردن خطرها
+Summarize|خلاصه‌سازی
+Distill docs and references|خلاصهٔ نکته‌های مهم اسناد
+Design UI|طراحی رابط کاربری
+Craft accessible components|ساخت بخش‌های قابل‌استفاده برای همه
+Pinned messages|پیام‌های سنجاق‌شده
+Jump to latest|رفتن به آخرین پیام
+No project selected|پروژه‌ای انتخاب نشده
+Text + tools|متن + ابزارها
+Minimize|جمع کردن
+Maximize|بزرگ کردن
+Restore|بازگرداندن
+Expand|باز کردن
+Upload|پیوست فایل
+Options|گزینه‌ها
+Agent|عامل
+Thinking|میزان بررسی
+Low|کم
+Medium|متوسط
+High|زیاد
+Default|پیش‌فرض
+None|هیچ‌کدام
+Skills|مهارت‌ها
+Browser|مرورگر
+Show|نمایش
+Hide|پنهان کردن
+Mascot|شخصیت
+Hidden|پنهان
+Voice|صدا
+Voice service|سرویس صدا
+Browser voice|صدای مرورگر
+NVIDIA cloud · developer trial|ابر NVIDIA · نسخهٔ آزمایشی توسعه‌دهندگان
+Mute mic|قطع میکروفون
+Mute microphone|قطع میکروفون
+Unmute mic|وصل میکروفون
+Unmute microphone|وصل میکروفون
+Mute speaker|قطع صدای خروجی
+Unmute speaker|وصل صدای خروجی
+Mic on · Speaker on|میکروفون و صدای خروجی روشن
+Mic muted · Speaker on|میکروفون قطع؛ صدای خروجی روشن
+Mic on · Speaker muted|میکروفون روشن؛ صدای خروجی قطع
+Mic muted · Speaker muted|میکروفون و صدای خروجی قطع
+Check voice access|بررسی دسترسی صدا
+Nothing is recorded until you start Talk.|تا شروع مکالمه، چیزی ضبط نمی‌شود.
+Dictate|تبدیل گفتار به متن
+Add speech to your draft|افزودن گفتار به پیش‌نویس
+Talk|مکالمه
+Send spoken turns & hear replies|گفتن درخواست و شنیدن پاسخ
+Show Seneschal companion|نمایش شخصیت Seneschal
+Stop|توقف
+Agent context|وضعیت و دسترسی عامل
+Build|اجرا
+Plan|برنامه‌ریزی
+Workspace pulse|نبض فضای کار
+Standby|در انتظار
+Work|کار
+Ambient|پس‌زمینه
+Last 60s|۶۰ ثانیهٔ اخیر
+60 seconds ago|۶۰ ثانیه پیش
+Now|اکنون
+Session work|کارهای این گفت‌وگو
+Engine|موتور اجرا
+Permissions|اجازه‌ها
+Manage|مدیریت
+Active tools|ابزارهای در دسترس
+Agent browser|مرورگر عامل
+Checking|در حال بررسی
+Checking…|در حال بررسی…
+New browser task|کار جدید در مرورگر
+Show window|نمایش پنجره
+Hide window|پنهان کردن پنجره
+Creative bridge|اتصال ابزارهای سه‌بعدی
+Checking the local bridge|بررسی اتصال محلی
+Open|باز کردن
+Code workspace|فضای کدنویسی
+Checking the local editor bridge|بررسی اتصال ویرایشگر محلی
+Paid API guard|کنترل هزینهٔ API
+Last 30 days · estimate|۳۰ روز اخیر · برآورد
+Providers|ارائه‌دهندگان مدل
+Inspect protocol log|بررسی گزارش اتصال
+Context|وضعیت عامل
+Session details|جزئیات گفت‌وگو
+Give it a name|انتخاب نام
+Session name|نام گفت‌وگو
+Cancel|انصراف
+Save name|ذخیرهٔ نام
+Project organization|سامان‌دهی پروژه
+Move this session|انتقال این گفت‌وگو
+Tools will continue working in|ابزارها همچنان در این پوشه کار می‌کنند:
+Destination project|پروژهٔ مقصد
+Move session|انتقال گفت‌وگو
+New workspace|فضای کار جدید
+Add a project|افزودن پروژه
+Project folder|پوشهٔ پروژه
+Add project|افزودن پروژه
+Project label|برچسب پروژه
+Rename project|تغییر نام نمایشی پروژه
+Display name|نام نمایشی
+Seneschal control|تنظیمات Seneschal
+Workspace settings|تنظیمات فضای کار
+Interface language|زبان رابط کاربری
+Language saved for this browser. Voice and model settings are unchanged.|زبان در این مرورگر ذخیره شد. تنظیمات صدا و مدل تغییری نکرد.
+Language changed for this page. This browser could not save your preference.|زبان این صفحه تغییر کرد، اما مرورگر نتوانست انتخاب شما را ذخیره کند.
+App and engine updates|به‌روزرسانی برنامه و موتور
+Check for updates|بررسی به‌روزرسانی
+Agent activity|فعالیت عامل
+Activity workspace|فضای بررسی فعالیت‌ها
+Instructions Studio|کارگاه دستورالعمل‌ها
+Ready|آماده
+ChatGPT companion|همراه ChatGPT
+Normal Chat|گفت‌وگوی معمولی
+Official usage dashboard|داشبورد رسمی مصرف
+Theme|رنگ‌بندی
+Workspace atmosphere|فضای پس‌زمینه
+Orbit Drift|حرکت مداری
+Ready for key|آمادهٔ دریافت کلید
+Paid API target|هدف هزینهٔ API
+Conversation voice|صدای مکالمه
+Turn-by-turn · Ready|نوبت‌به‌نوبت · آماده
+Approval policy|سیاست اجازه‌ها
+Ask before action|پیش از اقدام اجازه بگیر
+Private backups · PC only|پشتیبان خصوصی · فقط روی رایانه
+Verified history snapshots|نسخهٔ بررسی‌شده از تاریخچه
+Commands|فرمان‌ها
+Loading…|در حال بارگذاری…
+Archived sessions|گفت‌وگوهای بایگانی‌شده
+Privacy, honestly:|دربارهٔ حریم خصوصی، صادقانه:
+Back up now|پشتیبان‌گیری اکنون
+Check backup status|بررسی وضعیت پشتیبان
+Close|بستن
+Open advanced settings|تنظیمات پیشرفته
+Workspace atmospheres / 01—09|پس‌زمینه‌های فضای کار / ۰۱—۰۹
+Somewhere worth returning to.|جایی که بازگشت به آن دل‌چسب است.
+Your current world|دنیای فعلی شما
+Explore full scene ↗|دیدن صحنهٔ کامل ↗
+Pause motion|توقف حرکت
+Resume motion|ادامهٔ حرکت
+Next world →|دنیای بعدی ←
+This scene|این صحنه
+Color story|رنگ‌های صحنه
+Follow day / night|هماهنگ با روز و شب
+Nocturne · cool midnight|نوکتورن · نیمه‌شب خنک
+Ember · warm dusk|اخگر · غروب گرم
+Sakura · violet evening|ساکورا · شامگاه بنفش
+Weather|آب‌وهوا
+Clear|صاف
+Rain|باران
+Snow|برف
+Mist|مه
+Weather strength|شدت آب‌وهوا
+World activity|جنب‌وجوش صحنه
+Ambient glow|درخشش محیط
+Signature scene details|جزئیات ویژهٔ صحنه
+Reset this scene|بازنشانی این صحنه
+Workspace comfort|آسایش فضای کار
+Home visibility|نمایانی در صفحهٔ اصلی
+Conversation visibility|نمایانی پشت گفت‌وگو
+Animate during conversations|حرکت پس‌زمینه هنگام گفت‌وگو
+Enable conversation animation|فعال کردن حرکت هنگام گفت‌وگو
+Frame-rate limit|حداکثر نرخ تصویر
+15 fps · economical|۱۵ فریم در ثانیه · کم‌مصرف
+30 fps · balanced|۳۰ فریم در ثانیه · متعادل
+60 fps · smooth|۶۰ فریم در ثانیه · روان
+Automatic rotation|تعویض خودکار
+Rotate through all nine worlds|گردش بین هر نُه دنیا
+Change scene every|تعویض صحنه هر
+1 minute|۱ دقیقه
+5 minutes|۵ دقیقه
+10 minutes|۱۰ دقیقه
+15 minutes|۱۵ دقیقه
+30 minutes|۳۰ دقیقه
+1 hour|۱ ساعت
+Shuffle without immediate repeats|ترتیب تصادفی، بدون تکرار پشت‌سرهم
+Local rendering|نمایش محلی
+Local art · no audio capture · no AI calls|تصویرسازی محلی · بدون ضبط صدا · بدون درخواست هوش مصنوعی
+Scene preview|پیش‌نمایش صحنه
+Show hotspots|نمایش نقاط تعاملی
+Hide hotspots|پنهان کردن نقاط تعاملی
+Pause|توقف
+Resume|ادامه
+Conversation archive|بایگانی گفت‌وگوها
+Model connections|اتصال مدل‌ها
+Provider|ارائه‌دهنده
+API key|کلید API
+More providers|ارائه‌دهندگان بیشتر
+Connect|اتصال
+Permission control|کنترل اجازه‌ها
+Ask for approval|دریافت اجازه
+Recommended|پیشنهادی
+Always ask|همیشه اجازه بگیر
+Trusted project|پروژهٔ مورد اعتماد
+Save policy|ذخیرهٔ سیاست
+Companion space|فضای همراه
+Conversation space|فضای گفت‌وگو
+Uses normal ChatGPT chat allowance|از سهمیهٔ عادی گفت‌وگوی ChatGPT استفاده می‌کند
+Agent workspace|فضای کار عامل
+Uses agent / Codex allowance|از سهمیهٔ عامل / Codex استفاده می‌کند
+Why it opens separately:|چرا جداگانه باز می‌شود؟
+Not now|فعلاً نه
+Open ChatGPT Chat|باز کردن گفت‌وگوی ChatGPT
+Instruction control|مدیریت دستورالعمل‌ها
+All changes saved|همهٔ تغییرها ذخیره شد
+Persona|شخصیت دستیار
+Identity and address|هویت و شیوهٔ خطاب
+General|عمومی
+Rules for everything|قوانین مشترک
+Current workspace only|فقط فضای کار فعلی
+Agent roles|نقش عامل‌ها
+Build and Plan|اجرا و برنامه‌ریزی
+Reusable expertise|دانش قابل‌استفادهٔ دوباره
+Active stack|دستورالعمل‌های فعال
+What applies next|آنچه در درخواست بعدی اعمال می‌شود
+Global identity|هویت عمومی
+Persona instructions|دستورالعمل شخصیت
+Stored securely in OpenCode|ذخیره‌شده در OpenCode
+Restore recommended|بازگردانی نسخهٔ پیشنهادی
+Undo last save|برگرداندن آخرین ذخیره
+Save persona|ذخیرهٔ شخصیت
+Global behavior|رفتار عمومی
+General instructions|دستورالعمل‌های عمومی
+Combined automatically with the persona|خودکار با دستورالعمل شخصیت ترکیب می‌شود
+Save general rules|ذخیرهٔ قوانین عمومی
+Current workspace|فضای کار فعلی
+Project instructions|دستورالعمل‌های پروژه
+Select a project to edit its instructions.|برای ویرایش دستورالعمل‌ها، پروژه‌ای انتخاب کنید.
+Travels with the project|همراه پروژه نگه داشته می‌شود
+Start with a template|شروع با الگو
+Save project rules|ذخیرهٔ قوانین پروژه
+Working modes|حالت‌های کار
+Agent-role instructions|دستورالعمل نقش عامل‌ها
+Permissions remain protected|اجازه‌ها همچنان مستقل و محفوظ‌اند
+Implementation and verification|اجرا و بررسی نتیجه
+Undo|برگرداندن
+Save Build|ذخیرهٔ حالت اجرا
+Read-only analysis and strategy|بررسی و برنامه‌ریزی، بدون تغییر فایل
+Save Plan|ذخیرهٔ حالت برنامه‌ریزی
+Install from link|نصب از پیوند
++ New skill|+ مهارت جدید
+Available skills|مهارت‌های موجود
+No skills yet.|هنوز مهارتی وجود ندارد.
+Bring a trusted skill into Seneschal|افزودن یک مهارت معتبر به Seneschal
+Inspect|بررسی
+Skill ID|شناسهٔ مهارت
+Scope|محدوده
+Every project|همهٔ پروژه‌ها
+Current project|پروژهٔ فعلی
+Skill instructions|دستورالعمل مهارت
+Archive skill|بایگانی مهارت
+Save skill|ذخیرهٔ مهارت
+Effective context|دستورالعمل‌های مؤثر
+Active instruction stack|مجموعهٔ دستورالعمل‌های فعال
+Delete conversation|حذف گفت‌وگو
+Delete this conversation?|این گفت‌وگو حذف شود؟
+This conversation|این گفت‌وگو
+Keep conversation|نگه داشتن گفت‌وگو
+Delete permanently|حذف همیشگی
+Delete message|حذف پیام
+Delete this message?|این پیام حذف شود؟
+This message|این پیام
+Keep message|نگه داشتن پیام
+Delete from Seneschal|حذف از Seneschal
+Remove project|برداشتن پروژه از فهرست
+Remove this project?|پروژه از فهرست برداشته شود؟
+This project|این پروژه
+Keep project|نگه داشتن پروژه
+Edit message|ویرایش پیام
+Revise and retry|ویرایش و اجرای دوباره
+Your message|پیام شما
+Save and retry|ذخیره و اجرای دوباره
+Inspect a page|بررسی صفحه
+Website address|نشانی وب‌سایت
+What should it do?|چه کاری انجام دهد؟
+Isolated session|نشست جداگانه
+No saved browser profile|بدون نمایهٔ ذخیره‌شدهٔ مرورگر
+Run browser task|شروع کار مرورگر
+Multi-agent workflow|گردش کار چندعامل
+Project objective|هدف پروژه
+Parallel agents|عامل‌های هم‌زمان
+Import session|افزودن گفت‌وگوی موجود
+Starter team|تیم اولیه
+Add agent|افزودن عامل
+Run board|اجرای تابلو
+Pause queue|توقف صف
+Read the selected plan|خواندن برنامهٔ انتخاب‌شده
+Send one plan|ارسال یک برنامه
+Review the generated team|بررسی تیم پیشنهادی
+Run and supervise|اجرا و نظارت
+No agents yet.|هنوز عاملی وجود ندارد.
+Reset board|بازنشانی تابلو
+Stop running agents|توقف عامل‌های در حال کار
+Saved workflows|گردش کارهای ذخیره‌شده
+No saved boards yet.|هنوز تابلویی ذخیره نشده.
+Board agent|عامل تابلو
+Add an agent|افزودن عامل
+Name|نام
+Role|نقش
+Planner|برنامه‌ریز
+Builder|اجراکننده
+Reviewer|بازبین
+Supervisor|ناظر
+Model|مدل
+System access|دسترسی به سیستم
+Conversation only|فقط گفت‌وگو
+Read project|خواندن پروژه
+Read + browser research|خواندن پروژه و پژوهش در مرورگر
+Build and run tools|اجرا و استفاده از ابزارها
+Wait for these agents|منتظر این عامل‌ها بمان
+No other agents yet.|هنوز عامل دیگری وجود ندارد.
+Task|وظیفه
+Save agent|ذخیرهٔ عامل
+Local editor bridge|اتصال ویرایشگر محلی
+Open in Visual Studio Code|باز کردن در Visual Studio Code
+File path (optional)|مسیر فایل (اختیاری)
+Line|خط
+Column|ستون
+Install companion|نصب افزونهٔ همراه
+Open project|باز کردن پروژه
+Open file|باز کردن فایل
+↑↓ Navigate|↑↓ جابه‌جایی
+Enter Select|Enter انتخاب
+Live connection|اتصال زنده
+Protocol log|گزارش اتصال
+Retry loading Seneschal|تلاش دوباره برای بارگذاری Seneschal
+Layout|چیدمان
+Front|روبه‌رو
+Start Talk|شروع مکالمه
+Stop Talk|پایان مکالمه
+Move Seneschal|جابه‌جایی Seneschal
+Smaller|کوچک‌تر
+Larger|بزرگ‌تر
+Dock at bottom right|قرار دادن پایین سمت راست
+Front view|نمای روبه‌رو
+Reset layout|بازنشانی چیدمان
+Interface|رابط کاربری
+Allow once|فقط این بار
+Always|همیشه
+Reject|رد درخواست
+Check status|بررسی وضعیت
+Permission required|نیاز به اجازه
+OpenCode action|اقدام OpenCode
+Review this action before it can continue.|پیش از ادامه، این اقدام را بررسی کنید.
+Choose a decision. No action is approved automatically.|یک گزینه انتخاب کنید. هیچ اقدامی خودکار تأیید نمی‌شود.
+Pending question|پرسش در انتظار پاسخ
+Answer question|پاسخ به پرسش
+Refresh questions|تازه‌سازی پرسش‌ها
+Seneschal needs your answer|Seneschal به پاسخ شما نیاز دارد
+Dismiss question|رد درخواست پرسش
+Send answers|ارسال پاسخ‌ها
+Sending…|در حال ارسال…
+Select one or more answers.|یک یا چند پاسخ انتخاب کنید.
+Choose one answer.|یک پاسخ انتخاب کنید.
+Or write your own answer|یا پاسخ خودتان را بنویسید
+Your answer|پاسخ شما
+You|شما
+Actions|کارهای پیام
+To board|به تابلو
+Pin|سنجاق کردن
+Unpin|برداشتن سنجاق
+Archive|بایگانی
+Delete|حذف
+Edit|ویرایش
+Retry|تلاش دوباره
+Copy|کپی
+Copied|کپی شد
+Copied!|کپی شد!
+Model thinking summary|خلاصهٔ بررسی مدل
+Completed|انجام‌شده
+Running|در حال اجرا
+Pending|در انتظار
+Error|خطا
+Failed|ناموفق
+Stopped|متوقف
+Busy|مشغول
+Offline|قطع
+Online|متصل
+Live|فعال
+Unavailable|در دسترس نیست
+Listening|در حال شنیدن
+Speaking|در حال صحبت
+Thinking…|در حال بررسی…
+Loading|در حال بارگذاری
+Search|جست‌وجو
+Previous|قبلی
+Next|بعدی
+Save|ذخیره
+Saving…|در حال ذخیره…
+Refresh|تازه‌سازی
+Disconnect|قطع اتصال
+English|English
+`);
+  register(`
+Changes buttons and help on this browser only. Conversations, code, voice and model settings stay unchanged.|فقط دکمه‌ها و راهنمای همین مرورگر تغییر می‌کند. گفت‌وگوها، کد، صدا و تنظیمات مدل دست‌نخورده می‌مانند.
+Reload data without restarting or stopping tasks.|اطلاعات را بدون راه‌اندازی دوباره یا توقف کارها تازه کنید.
+Choose a project and begin a conversation. Local tools follow your approval policy; selected context is sent only to the cloud model you choose.|پروژه‌ای انتخاب کنید و گفت‌وگو را شروع کنید. ابزارهای محلی تابع سیاست اجازه‌های شما هستند؛ اطلاعات انتخابی برای مدل ابری منتخب شما ارسال می‌شود.
+The chat model and its billing stay unchanged. NVIDIA Talk uses English, up to 20 seconds per turn. Long spoken replies are shortened; full text stays in chat.|مدل گفت‌وگو و هزینهٔ آن تغییر نمی‌کند. مکالمهٔ NVIDIA انگلیسی است و هر نوبت حداکثر ۲۰ ثانیه است. پاسخ صوتی بلند کوتاه می‌شود؛ متن کامل در گفت‌وگو می‌ماند.
+Browser voice is separate from NVIDIA speech. Choose your voice service above.|صدای مرورگر از سرویس گفتار NVIDIA جداست. سرویس صدا را از بالا انتخاب کنید.
+NVIDIA receives microphone audio and reply text for speech. Trial inputs and outputs may be logged; avoid sensitive content. Free access has limits and is not guaranteed unlimited. No paid fallback is used.|NVIDIA صدای میکروفون و متن پاسخ را برای پردازش گفتار دریافت می‌کند. ورودی و خروجی نسخهٔ آزمایشی ممکن است ثبت شود؛ اطلاعات حساس نفرستید. دسترسی رایگان محدود است و همیشگی یا نامحدود تضمین نمی‌شود. سرویس پولی جایگزین خودکار نمی‌شود.
+I agree to send audio and reply text to NVIDIA for this developer trial.|با ارسال صدا و متن پاسخ به NVIDIA برای این آزمایش توسعه‌دهندگان موافقم.
+Dictation stays in your draft. Talk sends your spoken turns automatically. If dictation is unavailable, Mic records an audio attachment.|متن دیکته در پیش‌نویس می‌ماند. حالت مکالمه گفتار شما را خودکار ارسال می‌کند. اگر دیکته در دسترس نباشد، میکروفون فایل صوتی پیوست می‌کند.
+Your Seneschal mascot animates locally, with its own chest badge. NVIDIA mouth movement reacts to playback volume; browser-voice mouth movement is approximate, not phoneme-accurate lip sync.|شخصیت Seneschal با نشان روی سینه، به‌صورت محلی حرکت می‌کند. حرکت دهان با NVIDIA از بلندی صدا پیروی می‌کند؛ با صدای مرورگر تقریبی است و لب‌خوانی دقیق نیست.
+Checking the isolated Brave bridge|بررسی اتصال جداگانهٔ Brave
+Organize this conversation under another project. History, pins, and the selected model stay with it. Its working folder and files do not move.|این گفت‌وگو را زیر پروژهٔ دیگری قرار دهید. تاریخچه، سنجاق‌ها و مدل انتخابی حفظ می‌شوند. پوشهٔ کاری و فایل‌ها جابه‌جا نمی‌شوند.
+. To work in the destination folder, start a new session there.|. برای کار در پوشهٔ مقصد، گفت‌وگوی تازه‌ای در آن شروع کنید.
+Enter a Windows or WSL folder path. OpenCode will work inside that project and keep permissions scoped to it.|مسیر پوشه‌ای در Windows یا WSL را وارد کنید. OpenCode در همان پروژه کار می‌کند و اجازه‌ها را به محدودهٔ آن محدود نگه می‌دارد.
+This changes only the name shown in Seneschal. The folder, files, sessions, and tool paths remain unchanged.|فقط نام نمایشی در Seneschal تغییر می‌کند. پوشه، فایل‌ها، گفت‌وگوها و مسیر ابزارها تغییری نمی‌کنند.
+Check and update Seneschal and OpenCode separately|بررسی و به‌روزرسانی جداگانهٔ Seneschal و OpenCode
+History, tool activity, usage, and local service|تاریخچه، کار ابزارها، مصرف و سرویس محلی
+Persona, rules, agent roles, and skills|شخصیت، قوانین، نقش عامل‌ها و مهارت‌ها
+Separate ChatGPT allowance · opens securely|سهمیهٔ جداگانهٔ ChatGPT · باز شدن امن
+Check remaining 5-hour and weekly Work/Codex allowance|بررسی سهمیهٔ باقی‌ماندهٔ پنج‌ساعته و هفتگی Work/Codex
+Open the complete OpenCode controls|باز کردن همهٔ تنظیمات OpenCode
+Switch between the day and night palettes|جابه‌جایی بین رنگ‌بندی روز و شب
+Nine pixel worlds, including the restored Citylight|نُه دنیای پیکسلی، از جمله Citylight بازسازی‌شده
+Connect Zen, Gemini, DeepSeek, and other model providers|اتصال Zen، Gemini، DeepSeek و دیگر ارائه‌دهندگان مدل
+Open a browser task|شروع یک کار در مرورگر
+Coordinate specialist sessions and handoffs|هماهنگی گفت‌وگوها و تحویل کار بین عامل‌های تخصصی
+Open the current project or a file and line|باز کردن پروژهٔ فعلی یا رفتن به فایل و خط
+Open Blender with the local bridge|باز کردن Blender با اتصال محلی
+Connect or manage the provider key|اتصال یا مدیریت کلید ارائه‌دهنده
+Review providers and set provider-side limits|بررسی ارائه‌دهندگان و تعیین سقف هزینه در حساب آن‌ها
+Start or stop spoken conversation mode|شروع یا پایان مکالمهٔ صوتی
+Review Plan and Build permissions|بررسی اجازه‌های برنامه‌ریزی و اجرا
+Weekly when Seneschal launches, or back up now. Private content—not a shareable export.|هفتگی هنگام اجرای Seneschal، یا همین حالا پشتیبان بگیرید. محتوای خصوصی است؛ برای اشتراک‌گذاری عمومی نیست.
+Browse OpenCode commands, skills, and session references|مرور فرمان‌ها، مهارت‌ها و ارجاع‌های گفت‌وگوی OpenCode
+Review and restore conversations hidden from the sidebar|بررسی و بازگردانی گفت‌وگوهای پنهان‌شده از نوار کناری
+this interface runs locally, but your selected cloud model receives prompts and any file, browser, or Blender context needed for the task. Provider sign-in and API keys stay in OpenCode.|این رابط محلی اجرا می‌شود، اما مدل ابری انتخابی شما درخواست‌ها و اطلاعات موردنیاز از فایل، مرورگر یا Blender را دریافت می‌کند. اطلاعات ورود ارائه‌دهنده و کلیدهای API در OpenCode می‌مانند.
+Backups include private conversation text. Sign-in stores and pairing tokens are excluded. Projects and browser-only preferences need separate backups.|پشتیبان شامل متن خصوصی گفت‌وگوهاست؛ اطلاعات ورود و توکن‌های اتصال در آن نیست. پروژه‌ها و تنظیمات مخصوص مرورگر، پشتیبان جداگانه می‌خواهند.
+Four living Seneschal originals. Five worlds from Afterlight. These gallery images are still thumbnails: explore a full scene to see its motion and six interactions. Changes save automatically in this browser.|چهار صحنهٔ زندهٔ Seneschal و پنج دنیا از Afterlight. تصاویر گالری ثابت‌اند؛ صحنهٔ کامل را باز کنید تا حرکت و شش تعامل آن را ببینید. تغییرها خودکار در همین مرورگر ذخیره می‌شوند.
+Conversations use a still frame by default. Home and full-scene previews animate unless motion is paused or system Reduced motion is on.|پشت گفت‌وگو به‌صورت پیش‌فرض ثابت است. صفحهٔ اصلی و پیش‌نمایش کامل متحرک‌اند، مگر اینکه حرکت را متوقف کنید یا کاهش حرکت سیستم روشن باشد.
+Rotation waits while hidden, paused, previewing or in a quiet conversation. No catch-up jumps when you return.|وقتی صفحه پنهان، حرکت متوقف، پیش‌نمایش باز یا گفت‌وگو ثابت است، تعویض صحنه منتظر می‌ماند. با بازگشت شما صحنه‌ها ناگهانی جلو نمی‌پرند.
+Live animation · click a detail or press 1–6 · Esc to return|صحنهٔ زنده · کلیک روی جزئیات یا کلیدهای ۱ تا ۶ · Esc برای بازگشت
+Explore the details, or use the six action buttons below.|جزئیات را امتحان کنید یا از شش دکمهٔ تعاملی پایین استفاده کنید.
+Six actions · use the buttons, numbered keys, or scene hotspots.|شش تعامل · با دکمه‌ها، کلیدهای عددی یا نقاط مشخص‌شدهٔ صحنه
+Archiving hides a session locally without deleting its OpenCode conversation. Restore any session to return it to the sidebar.|بایگانی، گفت‌وگو را فقط در این رابط پنهان می‌کند و آن را از OpenCode حذف نمی‌کند. با بازگردانی، دوباره در نوار کناری دیده می‌شود.
+Connect a provider directly. Your key is sent only to the local OpenCode engine and is never saved by this page.|مستقیم به ارائه‌دهنده متصل شوید. کلید شما فقط به موتور محلی OpenCode فرستاده می‌شود و این صفحه آن را ذخیره نمی‌کند.
+Choose how much freedom Build mode receives. Plan mode always remains read-only.|آزادی عمل حالت اجرا را انتخاب کنید. حالت برنامه‌ریزی همیشه فقط‌خواندنی می‌ماند.
+Safe reads run automatically; edits, commands, browser, Blender, and external actions ask first.|خواندن امن خودکار انجام می‌شود؛ ویرایش، فرمان‌ها، مرورگر، Blender و اقدامات خارجی ابتدا اجازه می‌خواهند.
+Also asks before reading files. Safest, but produces many interruptions.|پیش از خواندن فایل هم اجازه می‌گیرد. محتاطانه‌ترین حالت است، ولی وقفه‌های بیشتری دارد.
+Build may edit files and run commands without asking. External, browser, and Blender actions still ask.|حالت اجرا می‌تواند بدون پرسش فایل ویرایش کند و فرمان اجرا کند. اقدامات خارجی، مرورگر و Blender همچنان اجازه می‌خواهند.
+“Allow once”, “Always”, and “Reject” still appear whenever an individual approval is requested.|هر بار که اقدامی نیاز به اجازه داشته باشد، «فقط این بار»، «همیشه» و «رد درخواست» نمایش داده می‌شود.
+Use your normal ChatGPT experience alongside Seneschal, without mixing their limits or permissions.|از ChatGPT معمولی کنار Seneschal استفاده کنید، بدون مخلوط شدن سهمیه‌ها یا اجازه‌های آن‌ها.
+General chat, creativity, images, and the features available on your ChatGPT account.|گفت‌وگوی عمومی، خلاقیت، تصویر و امکانات حساب ChatGPT شما
+Projects, files, browser tasks, Blender, skills, and permission-controlled actions.|پروژه‌ها، فایل‌ها، کارهای مرورگر، Blender، مهارت‌ها و اقدامات نیازمند اجازه
+ChatGPT account sessions are not a reusable API. Opening the official ChatGPT surface protects your login and keeps the allowance distinction honest.|نشست حساب ChatGPT یک API قابل‌استفادهٔ مجدد نیست. باز کردن رابط رسمی، ورود شما را محفوظ نگه می‌دارد و سهمیه‌ها را جدا نگه می‌دارد.
+Edit what Seneschal knows about you, this project, and each working mode.|دانسته‌های Seneschal دربارهٔ خودتان، این پروژه و هر حالت کاری را ویرایش کنید.
+Changes stay local and are backed up before every save.|تغییرها محلی می‌مانند و پیش از هر ذخیره از آن‌ها پشتیبان گرفته می‌شود.
+How Seneschal identifies itself and addresses you in every project.|اینکه Seneschal در همهٔ پروژه‌ها خود را چگونه معرفی کند و شما را چگونه خطاب کند
+Rules that apply to every conversation, model, and project.|قوانینی که برای همهٔ گفت‌وگوها، مدل‌ها و پروژه‌ها اعمال می‌شوند
+Architecture, goals, conventions, and boundaries for only the selected project.|ساختار، هدف‌ها، قراردادها و محدودیت‌های مخصوص پروژهٔ انتخاب‌شده
+Extra system guidance applied privately when you choose Build or Plan.|راهنمای اضافی سیستم که در حالت اجرا یا برنامه‌ریزی اعمال می‌شود
+These notes cannot grant tools or bypass permissions. The permission inspector remains authoritative.|این یادداشت‌ها نمی‌توانند ابزار مجاز کنند یا اجازه‌ها را دور بزنند. تنظیمات بخش اجازه‌ها تعیین‌کننده است.
+Create expertise once, then activate one or several skills for upcoming requests.|دانش تخصصی را یک‌بار بنویسید و یک یا چند مهارت را برای درخواست‌های بعدی فعال کنید.
+Paste a GitHub repository, SKILL.md link, or skill folder. We inspect it first; nothing is installed until you approve it.|پیوند مخزن GitHub، فایل SKILL.md یا پوشهٔ مهارت را وارد کنید. ابتدا بررسی می‌شود؛ تا تأیید نکنید چیزی نصب نمی‌شود.
+Checked skills are requested automatically. The model loads their full instructions only when needed.|مهارت‌های علامت‌خورده خودکار درخواست می‌شوند. مدل فقط در صورت نیاز متن کامل دستورالعمل آن‌ها را می‌خواند.
+A readable preview of what influences the next request.|پیش‌نمایش خوانای دستورالعمل‌هایی که بر درخواست بعدی اثر دارند
+and its message history will be permanently removed. Project files created by the agent will not be deleted.|و تاریخچهٔ پیام‌هایش برای همیشه حذف می‌شود. فایل‌های پروژه که عامل ساخته، حذف نمی‌شوند.
+will disappear permanently from Seneschal on this device. OpenCode does not provide safe single-message deletion, so its source transcript remains unchanged.|برای همیشه از Seneschal در این دستگاه برداشته می‌شود. چون OpenCode حذف امن تک‌پیام ندارد، رونوشت اصلی آن تغییر نمی‌کند.
+will be removed from Seneschal’s sidebar. Its folder, files, and OpenCode sessions will not be deleted.|از نوار کناری Seneschal برداشته می‌شود. پوشه، فایل‌ها و گفت‌وگوهای OpenCode حذف نمی‌شوند.
+This returns the conversation to this message, removes later responses from the active branch, and runs your corrected request.|گفت‌وگو به این پیام برمی‌گردد، پاسخ‌های بعدی از شاخهٔ فعال کنار می‌روند و درخواست اصلاح‌شده اجرا می‌شود.
+The agent can navigate, click, type, inspect page structure, and take screenshots. Browser actions still follow your approval policy.|عامل می‌تواند صفحه باز کند، کلیک و تایپ کند، ساختار صفحه را بررسی کند و تصویر بگیرد. اقدامات مرورگر تابع سیاست اجازه‌های شما هستند.
+Inspect the page, test the main interactions, and report any visible problems. Take a screenshot if it helps.|صفحه را بررسی کن، تعامل‌های اصلی را آزمایش کن و مشکل‌های قابل‌مشاهده را گزارش بده. در صورت نیاز تصویر بگیر.
+Independent OpenCode sessions share verified handoffs through explicit dependencies.|گفت‌وگوهای مستقل OpenCode، با وابستگی‌های مشخص کار را به هم تحویل می‌دهند.
+Each card is a real session. Models and access are chosen per agent. You see provider-supplied summaries and tool activity—not private chain-of-thought.|هر کارت یک گفت‌وگوی واقعی است. مدل و دسترسی هر عامل جدا انتخاب می‌شود. خلاصه‌های ارائه‌شده و کار ابزارها را می‌بینید، نه زنجیرهٔ فکری خصوصی مدل.
+Use “To board” on a planning response. Seneschal reads only that chosen message.|روی پاسخ برنامه‌ریزی «به تابلو» را انتخاب کنید. Seneschal فقط همان پیام انتخاب‌شده را می‌خواند.
+An architect proposes the roles, tasks, models, access, dependencies, and parallel work.|عامل طراح، نقش‌ها، وظایف، مدل‌ها، دسترسی‌ها، وابستگی‌ها و کارهای هم‌زمان را پیشنهاد می‌کند.
+Agents exchange visible requests. The Supervisor can return weak work for another pass.|درخواست‌های ردوبدل‌شده بین عامل‌ها قابل‌دیدن‌اند. ناظر می‌تواند کار ضعیف را برای بازبینی دوباره برگرداند.
+Boards are separate from ordinary sessions. Open a saved board exactly as it was—no plan is resent and the Board Architect does not redesign it.|تابلوها از گفت‌وگوهای معمولی جدا هستند. تابلوی ذخیره‌شده همان‌طور که بوده باز می‌شود؛ برنامه دوباره فرستاده یا طراحی نمی‌شود.
+All selected agents must finish before this one starts.|همهٔ عامل‌های انتخاب‌شده باید تمام شوند تا این عامل شروع کند.
+Open the current WSL project, or jump directly to a file and line. Install the optional companion to add a Seneschal button inside VS Code for opening this project or choosing its session.|پروژهٔ WSL فعلی را باز کنید یا مستقیم به فایل و خط بروید. افزونهٔ اختیاری، دکمهٔ Seneschal را برای باز کردن پروژه یا انتخاب گفت‌وگو به VS Code اضافه می‌کند.
+Drag the character to rotate. Drag its header to move.|برای چرخاندن دوربین، شخصیت را بکشید. برای جابه‌جایی کارت، نوار بالای آن را بکشید.
+`);
+  register(`
+Quick navigation|دسترسی سریع
+Agent context shortcuts|میان‌برهای وضعیت عامل
+Show projects|نمایش پروژه‌ها
+Show sessions|نمایش گفت‌وگوها
+Show permissions|نمایش مجوزها
+Show active tools|نمایش ابزارهای در دسترس
+Show providers|نمایش سرویس‌دهندگان
+Show workspace pulse|نمایش فعالیت فضای کار
+No waiting approvals|هیچ درخواست اجازه‌ای منتظر نیست
+`);
+  const helpFa = {
+    compactProjects: 'پوشه‌های پروژه را در نوار کناری نشان دهید. این کار هیچ فایلی را باز، جابه‌جا یا حذف نمی‌کند.',
+    compactSessions: 'گفت‌وگوهای ذخیره‌شدهٔ پروژهٔ فعلی را نشان دهید. چیزی ارسال یا دوباره اجرا نمی‌شود.',
+    compactPermissions: 'تنظیمات مجوزها را نشان دهید. نشان کهربایی یعنی تصمیمی منتظر است؛ این دکمه هیچ اقدامی را تأیید نمی‌کند.',
+    compactTools: 'ابزارهای در دسترس این عامل را ببینید. باز کردن این بخش ابزاری را اجرا یا مجوزی صادر نمی‌کند.',
+    compactProviders: 'اتصال سرویس‌دهندگان مدل را ببینید. باز کردن این بخش حسابی متصل یا پرداختی فعال نمی‌کند.',
+    compactPulse: 'فعالیت اخیر فضای کار را ببینید. این بخش اعتبار باقی‌مانده یا هزینه را نشان نمی‌دهد.',
+    homeButton: 'به صفحهٔ اصلی فضای کار برگردید. در صفحهٔ کوچک، نوار کناری پروژه‌ها را باز یا بسته کنید.',
+    interfaceLanguage: 'زبان دکمه‌ها، تنظیمات و راهنما را در این مرورگر انتخاب کنید. گفت‌وگوها ترجمه نمی‌شوند و مدل یا صدا تغییر نمی‌کند.',
+    modelPickerButton: 'مدل هوش مصنوعی درخواست بعدی را انتخاب کنید. دسترسی، سهمیه و هزینه به ارائه‌دهندهٔ آن بستگی دارد.',
+    modelSearchInput: 'با نوشتن بخشی از نام مدل یا ارائه‌دهنده آن را پیدا کنید. این جست‌وجو پیام ارسال نمی‌کند.',
+    commandButton: 'گفت‌وگوها، مدل‌ها و کارهای فضای کار را یک‌جا پیدا کنید. میان‌بر باز کردن آن Ctrl K است.',
+    refreshButton: 'اطلاعات فضای کار را تازه کنید، بدون راه‌اندازی دوبارهٔ Seneschal یا توقف کارها.',
+    themeSwitch: 'رنگ رابط را بین روز و شب عوض کنید. تصویر پس‌زمینه جداگانه انتخاب می‌شود.',
+    settingsButton: 'تنظیمات برنامه، اتصال‌ها، اجازه‌ها، به‌روزرسانی‌ها و ابزارهای فضای کار را باز کنید.',
+    newSessionButton: 'گفت‌وگوی جداگانه‌ای در پروژهٔ انتخاب‌شده شروع کنید. گفت‌وگوهای دیگر محفوظ می‌مانند.',
+    leftPanelToggle: 'نوار پروژه‌ها را جمع یا باز کنید تا جا برای گفت‌وگو بیشتر شود. چیزی حذف نمی‌شود.',
+    rightPanelToggle: 'نوار وضعیت عامل، شامل شخصیت، ابزارها و اجازه‌ها را جمع یا باز کنید.',
+    addProjectButton: 'پوشهٔ کاری را به Seneschal اضافه کنید. دستیار برای کارهای آن پروژه از همین پوشه استفاده می‌کند.',
+    projectPathInput: 'پوشه‌ای را وارد کنید که دستیار باید در آن کار کند. افزودن پروژه، فایل‌ها را کپی یا جابه‌جا نمی‌کند.',
+    projectNameInput: 'نام نمایشی پروژه در Seneschal را تغییر دهید. نام واقعی پوشه عوض نمی‌شود.',
+    projectsCollapseButton: 'فهرست پروژه‌ها را جمع یا باز کنید. پوشه‌ای حذف نمی‌شود.',
+    sessionsCollapseButton: 'فهرست گفت‌وگوها را جمع یا باز کنید. گفت‌وگوهای ذخیره‌شده حفظ می‌شوند.',
+    pinnedSessionsCollapseButton: 'گفت‌وگوهای سنجاق‌شده را جمع یا باز کنید.',
+    pinnedMessagesCollapseButton: 'پیام‌های سنجاق‌شدهٔ بالای این گفت‌وگو را جمع یا باز کنید.',
+    archivedSessionsButton: 'گفت‌وگوهای پنهان‌شده از فهرست عادی را پیدا و در صورت نیاز بازگردانی کنید.',
+    archivedMessagesButton: 'پیام‌های بایگانی‌شدهٔ این گفت‌وگو را ببینید. بایگانی با حذف فرق دارد.',
+    motionSwitch: 'پس‌زمینه را انتخاب و پیش‌نمایش کنید و حرکت یا روشنایی آن را تنظیم کنید. تصویرسازی محلی است.',
+    activityRailButton: 'گفت‌وگوهای ثبت‌شده، کار ابزارها و برآورد مصرف را ببینید. تاریخچه از رایانه خوانده می‌شود.',
+    workspaceToolsButton: 'ابزارهای بیشتر مانند تابلوی عامل‌ها، دستورالعمل‌ها و رابط اصلی موتور را باز کنید.',
+    agentBoardButton: 'با چند عامل تخصصی کار را برنامه‌ریزی کنید. پیش از اجرا، وظایف و دسترسی آن‌ها را بررسی کنید.',
+    agentBoardHistoryRailButton: 'تابلوی ذخیره‌شده را دوباره باز کنید، بدون اجرای خودکار عامل‌ها یا ارسال دوبارهٔ برنامه.',
+    instructionsRailButton: 'سبک دستیار، قوانین پروژه، نقش عامل‌ها و مهارت‌ها را مدیریت کنید. این‌ها نمی‌توانند اجازه‌ها را دور بزنند.',
+    chatGPTRailButton: 'یک گفت‌وگوی جداگانهٔ ChatGPT باز کنید. اجازه‌های Seneschal یا متن این گفت‌وگو خودکار به آن منتقل نمی‌شود.',
+    openChatGPTUsageButton: 'صفحهٔ رسمی مصرف حساب را برای بررسی سهمیه باز کنید. این سهمیه از هزینهٔ API ارائه‌دهنده جداست.',
+    classicButton: 'رابط کامل OpenCode را برای تنظیمات پیشرفتهٔ موتور و ارائه‌دهندگان باز کنید.',
+    renameSessionButton: 'برای پیدا کردن آسان‌تر، نام گفت‌وگو را عوض کنید. پیام‌ها و فایل‌های پروژه حفظ می‌شوند.',
+    moveSessionButton: 'گفت‌وگو را زیر پروژهٔ دیگری قرار دهید. پوشهٔ کاری و فایل‌های موجود جابه‌جا نمی‌شوند.',
+    exportSessionButton: 'نسخه‌ای از گفت‌وگو ذخیره کنید. پیش از اشتراک‌گذاری بررسی کنید؛ ممکن است پیام و خروجی خصوصی داشته باشد.',
+    sendSessionToBoardButton: 'از این گفت‌وگو برای برنامه‌ریزی تابلوی عامل‌ها استفاده کنید. پیش از اجرا تیم پیشنهادی را بررسی کنید.',
+    openSessionVsCodeButton: 'پروژهٔ فعلی را در Visual Studio Code روی رایانه باز کنید.',
+    abortButton: 'از موتور بخواهید کار فعلی را متوقف کند. کارهای انجام‌شده خودکار برگردانده نمی‌شوند.',
+    deleteSessionButton: 'تأیید حذف این گفت‌وگو را بررسی کنید. فایل‌های پروژه حذف نمی‌شوند.',
+    confirmDeleteSessionButton: 'این گفت‌وگو و تاریخچهٔ پیام‌هایش را برای همیشه حذف کنید. فایل‌های پروژه حذف نمی‌شوند.',
+    confirmDeleteMessageButton: 'پیام را از نمای Seneschal در این دستگاه بردارید. رونوشت اصلی موتور تغییر نمی‌کند.',
+    confirmDeleteProjectButton: 'پروژه را از نوار Seneschal بردارید. پوشه، فایل‌ها و گفت‌وگوهای موتور باقی می‌مانند.',
+    resumeFollowButton: 'به تازه‌ترین پیام بروید. چیزی ارسال نمی‌شود و کار از نو شروع نمی‌شود.',
+    exitMessageMaximizeButton: 'از نمای بزرگ پیام به چیدمان معمولی فضای کار برگردید.',
+    composerMinimizeButton: 'کادر پیام را جمع یا باز کنید. پیش‌نویس ارسال‌نشده حفظ می‌شود.',
+    composerSizeButton: 'برای نوشتن جای بیشتری باز کنید یا کادر پیام را به اندازهٔ جمع‌وجور برگردانید.',
+    promptInput: 'درخواستتان را بنویسید. Enter ارسال می‌کند و Shift Enter خط جدید می‌سازد. تایپ به‌تنهایی چیزی نمی‌فرستد.',
+    fileInput: 'فایل به پیش‌نویس پیوست کنید. هنگام ارسال پیام ممکن است محتوای آن برای ارائه‌دهندهٔ مدل فرستاده شود.',
+    composerOptionsSummary: 'تنظیمات بیشتر پیام، شامل حالت عامل، میزان بررسی و مهارت‌ها را باز کنید. پیش‌نویس ارسال نمی‌شود.',
+    agentSelect: 'شیوهٔ کار دستیار را انتخاب کنید: گفت‌وگو، برنامه‌ریزی یا اجرا. ابزارها همچنان تابع اجازه‌ها هستند.',
+    modelVariantSelect: 'در مدل‌های سازگار، میزان بررسی را انتخاب کنید. بررسی بیشتر ممکن است کندتر و پرمصرف‌تر باشد؛ افکار خصوصی مدل را نشان نمی‌دهد.',
+    browserButton: 'کاری برای مرورگر جداگانهٔ عامل آماده کنید. پیش از شروع، سایت و دستورها را بررسی کنید.',
+    browserWindowButton: 'پنجرهٔ مرورگر عامل را روی رایانه نشان دهید یا پنهان کنید. کار مرورگر می‌تواند در حالت پنهان ادامه یابد.',
+    aresToggle: 'شخصیت متحرک را نشان دهید یا پنهان کنید. این کار به‌تنهایی میکروفون را روشن یا مدل را عوض نمی‌کند.',
+    voiceButton: 'مکالمه را شروع یا متوقف کنید. گفتار تشخیص‌داده‌شده خودکار ارسال و پاسخ با سرویس انتخابی خوانده می‌شود.',
+    voiceMenuButton: 'سرویس صدا و تنظیمات آن را انتخاب کنید. این پیکان فقط تنظیمات را باز می‌کند و ضبط را شروع نمی‌کند.',
+    voiceServiceSelect: 'صدای مرورگر یا گفتار ابری NVIDIA را انتخاب کنید؛ جدا از مدل گفت‌وگوست. سرویس ابری، صدا و متن پاسخ را خارج از رایانه پردازش می‌کند.',
+    nvidiaVoiceConsent: 'اجازه دهید صدا و متن پاسخ به سرویس آزمایشی NVIDIA برسد. ثبت داده و محدودیت مصرف ممکن است اعمال شود؛ اطلاعات محرمانه نفرستید.',
+    checkNvidiaVoice: 'دسترسی به صداهای NVIDIA را بررسی کنید. این کار میکروفون را روشن نمی‌کند و رایگان بودن نامحدود را تضمین نمی‌کند.',
+    micButton: 'گفتار را به پیش‌نویس اضافه کنید؛ اگر دیکته موجود نباشد، فایل صوتی ضبط کنید. پیش از ارسال، پیش‌نویس را بررسی کنید.',
+    sendButton: 'پیش‌نویس و پیوست‌ها را به مدل انتخابی بفرستید. ممکن است از سهمیه کم شود یا هزینهٔ API داشته باشد.',
+    openApprovalButton: 'تعیین کنید ابزارها چه زمانی اجازه بخواهند. تغییر سیاست، درخواست منتظر را تأیید نمی‌کند.',
+    approvalSaveButton: 'سیاست انتخابی را ذخیره کنید. درخواست ابزار که منتظر تصمیم است با این کار تأیید نمی‌شود.',
+    openBlenderButton: 'Blender را روی رایانه باز کنید. اقدامات آن همچنان تابع اجازه‌های ابزار هستند.',
+    protocolButton: 'گزارش اتصال و ابزارها را برای رفع اشکال ببینید. گزارش‌ها ممکن است اطلاعات خصوصی پروژه داشته باشند.',
+    openInspectorButton: 'وضعیت عامل، اجازه‌ها، ابزارهای موجود، اتصال‌ها و فعالیت فضای کار را باز کنید.',
+    settingsUpdatesButton: 'به‌روزرسانی برنامه و موتور را جدا بررسی کنید. بررسی نسخه‌ها چیزی نصب نمی‌کند.',
+    settingsProvidersButton: 'ارائه‌دهندهٔ مدل را متصل یا کلید آن را مدیریت کنید. دسترسی، هزینه و محدودیت آن مستقل از Seneschal است.',
+    settingsBudgetButton: 'هدف هزینه و محدودیت حساب ارائه‌دهنده را بررسی کنید. عدد هدف، سقف قطعی صورتحساب نیست.',
+    settingsBackupsButton: 'پشتیبان خصوصی روی رایانه بسازید. ممکن است تاریخچهٔ حساس داشته باشد؛ مانند فایل خروجی معمولی به اشتراک نگذارید.',
+    backupStatusButton: 'بررسی کنید پشتیبان‌گیری موفق بوده یا نه. این کار پشتیبان جدید نمی‌سازد.',
+    settingsCommandsButton: 'فرمان‌ها و ارجاع‌های موجود را مرور کنید. انتخاب یک اقدام ممکن است فرمان همان مورد را آماده یا اجرا کند.',
+    atmosphereClose: 'تنظیمات پس‌زمینه را ببندید و برگردید. پس‌زمینهٔ انتخابی حفظ می‌شود.',
+    atmospherePreviewButton: 'پس‌زمینه را در نمای بزرگ‌تر ببینید. تصویرسازی محلی است، نه کار هوش مصنوعی یا ضبط صدا.',
+    atmospherePreviewClose: 'از پیش‌نمایش بزرگ به مجموعهٔ پس‌زمینه‌ها برگردید.',
+    atmospherePause: 'حرکت پس‌زمینه را متوقف یا ادامه دهید. کار هوش مصنوعی و صدا متوقف نمی‌شوند.',
+    atmosphereNext: 'به دنیای پس‌زمینهٔ بعدی بروید. گفت‌وگو و پیش‌نویس تغییری نمی‌کنند.',
+    atmospherePalette: 'رنگ‌های پس‌زمینه را عوض کنید یا آن را با رنگ‌بندی روز و شب هماهنگ کنید.',
+    atmosphereWeather: 'آب‌وهوا یا حرکت آب را انتخاب کنید. جلوه‌های موجود به پس‌زمینه بستگی دارد.',
+    atmosphereIntensity: 'شدت باران، برف، مه یا ذره‌های صحنه را تنظیم کنید.',
+    atmosphereActivity: 'جنب‌وجوش پس‌زمینه، مانند ترافیک یا جزئیات متحرک را تنظیم کنید.',
+    atmosphereGlow: 'درخشش داخل پس‌زمینه را تنظیم کنید، نه روشنایی واقعی نمایشگر.',
+    atmosphereFeature: 'جزئیات ویژهٔ این دنیا را نشان دهید یا پنهان کنید.',
+    atmosphereReset: 'تنظیمات این صحنه را به پیش‌فرض برگردانید. گفت‌وگوها و فایل‌ها تغییر نمی‌کنند.',
+    atmosphereStrength: 'میزان نمایان بودن پس‌زمینه در صفحهٔ اصلی را تنظیم کنید.',
+    atmosphereConversationStrength: 'نمایانی پس‌زمینه پشت پیام‌ها را تنظیم کنید. مقدار کمتر می‌تواند خواندن متن را آسان‌تر کند.',
+    atmosphereAnimateConversation: 'اجازه دهید پس‌زمینه هنگام گفت‌وگو حرکت کند. خاموش بودن، حواس‌پرتی و مصرف گرافیک را کمتر می‌کند.',
+    atmosphereQuality: 'حداکثر فریم‌برثانیه را تعیین کنید. مقدار کمتر، منابع گرافیکی کمتری مصرف می‌کند.',
+    atmosphereRotation: 'تعویض خودکار دنیاها را تنظیم کنید. در حالت توقف یا پنهان بودن صفحه، گردش منتظر می‌ماند.',
+    atmosphereMinutes: 'مدت ماندن هر پس‌زمینه پیش از تعویض خودکار را انتخاب کنید.',
+    atmosphereShuffle: 'پس‌زمینه‌ها را به‌جای ترتیب ثابت، با ترتیب تصادفی عوض کنید.',
+    atmosphereShowHotspots: 'نقاط تعاملی پیش‌نمایش را مشخص کنید. این کار روی ابزارهای هوش مصنوعی اثری ندارد.',
+    providerConnectSelect: 'شرکت یا سرویسی را انتخاب کنید که مدل هوش مصنوعی را فراهم می‌کند.',
+    providerKeyInput: 'کلید API ارائه‌دهنده را وارد کنید. محرمانه نگه دارید؛ به موتور محلی فرستاده می‌شود، نه متن گفت‌وگو.',
+    providerAdvancedButton: 'گزینه‌های پیشرفته را برای ارائه‌دهندگانی که در این فرم نیستند باز کنید.',
+    providerConnectButton: 'اتصال ارائه‌دهنده را در موتور محلی ذخیره کنید. این کار سرویس را رایگان یا هزینه را محدود نمی‌کند.',
+    personaEditor: 'نام، لحن و سبک دستیار را تعیین کنید. این دستورالعمل‌ها اجازهٔ ابزار بیشتری نمی‌دهند.',
+    generalEditor: 'ترجیح‌ها و قوانین مشترک پروژه‌ها را بنویسید. پس از بررسی، ویرایش‌ها را ذخیره کنید.',
+    projectEditor: 'قوانین مخصوص پروژه، مثل قراردادها، آزمایش‌ها و فایل‌هایی که نباید تغییر کنند را بنویسید.',
+    buildAgentEditor: 'دستورالعمل این عامل را تنظیم کنید. ابزارهای مجاز آن همچنان تابع سیاست اجازه‌ها هستند.',
+    installSkillLinkButton: 'مهارت را پیش از نصب از پیوند مخزن بررسی کنید. مهارت دستورالعمل را تغییر می‌دهد؛ فقط از منبع معتبر نصب کنید.',
+    newSkillButton: 'مهارت قابل‌استفادهٔ دوباره بسازید. تا انتخاب «ذخیره» چیزی ذخیره نمی‌شود.',
+    skillNameInput: 'شناسهٔ کوتاهی برای پیدا کردن و استفادهٔ دوبارهٔ مهارت انتخاب کنید.',
+    skillScopeSelect: 'تعیین کنید مهارت مخصوص این پروژه باشد یا در همهٔ پروژه‌ها در دسترس باشد.',
+    skillEditor: 'دستورالعمل مهارت را ویرایش کنید. رمز و کلید API در آن ننویسید.',
+    archiveSkillButton: 'مهارت انتخابی را از فهرست فعال به بایگانی ببرید.',
+    saveSkillButton: 'دستورالعمل مهارت را در محدودهٔ انتخابی ذخیره کنید. پیش از استفاده آن را بررسی کنید.',
+    messageEditInput: 'درخواست قبلی را اصلاح کنید. ذخیره و تلاش دوباره، گفت‌وگو را به آن نقطه برمی‌گرداند و درخواست اصلاح‌شده را اجرا می‌کند.',
+    browserUrlInput: 'نشانی سایتی را وارد کنید که عامل باید در مرورگر جداگانه باز کند.',
+    browserTaskInput: 'کار عامل در سایت را توضیح دهید. رمز یا اطلاعات محرمانه وارد نکنید.',
+    runBrowserButton: 'دستورهای این کار مرورگر را به دستیار بفرستید. مرورگر و ابزارهای دیگر همچنان تابع اجازه‌ها هستند.',
+    agentBoardObjective: 'نتیجه‌ای را که از تیم عامل‌ها می‌خواهید توضیح دهید.',
+    agentBoardConcurrency: 'تعداد عامل‌های هم‌زمان را محدود کنید. عامل بیشتر ممکن است سهمیهٔ بیشتری مصرف کند.',
+    agentBoardImportButton: 'گفت‌وگوی موجود را وارد تابلو کنید. اطلاعات مورد استفاده را بررسی کنید.',
+    agentBoardTemplateButton: 'تیم اولیه‌ای برای ویرایش اضافه کنید. این کار به‌تنهایی عامل‌ها را اجرا نمی‌کند.',
+    agentBoardAddButton: 'عامل تخصصی با وظیفه، مدل و دسترسی جداگانه اضافه کنید.',
+    agentBoardRunButton: 'عامل‌های آمادهٔ این تابلو را اجرا کنید. ابتدا وظایف، مدل‌ها، دسترسی‌ها و وابستگی‌ها را بررسی کنید.',
+    agentBoardPauseButton: 'شروع عامل‌های بعدی را متوقف کنید. عامل‌های مشغول جداگانه متوقف می‌شوند.',
+    agentBoardResetButton: 'وضعیت گردش کار تابلو را بازنشانی کنید. پیش از کنار گذاشتن تنظیمات، تأیید را بررسی کنید.',
+    agentBoardStopButton: 'از عامل‌های مشغول بخواهید متوقف شوند. تغییرهای انجام‌شده خودکار برنمی‌گردند.',
+    agentNameInput: 'نامی روشن برای وظیفهٔ عامل انتخاب کنید، مانند پژوهشگر یا بازبین.',
+    agentRoleInput: 'نقش این عامل را در تیم، مانند برنامه‌ریز، اجراکننده یا بازبین انتخاب کنید.',
+    agentModelInput: 'مدل این عامل را انتخاب کنید. هزینه و محدودیت ارائه‌دهندهٔ آن اعمال می‌شود.',
+    agentAccessInput: 'ابزارهای در دسترس این عامل را انتخاب کنید. در دسترس بودن ابزار به معنی اجازهٔ خودکار اجرای آن نیست.',
+    agentPromptInput: 'یک مسئولیت روشن و نتیجهٔ مورد انتظار را برای این عامل بنویسید.',
+    vscodePathInput: 'در صورت نیاز، مسیر فایل پروژه را برای باز شدن در Visual Studio Code وارد کنید.',
+    vscodeLineInput: 'جای نشانگر ویرایشگر را در فایل انتخاب کنید.',
+    installVsCodeCompanionButton: 'افزونهٔ اختیاری ویرایشگر را روی رایانه نصب کنید. میان‌برهایی بین VS Code و Seneschal اضافه می‌کند.',
+    aresDrag: 'کارت شناور شخصیت را با این دستگیره بکشید. کلیدهای جهت هم آن را جابه‌جا می‌کنند؛ گزینه‌های جای‌گیری در «چیدمان» هستند.',
+    aresMinimize: 'کارت شخصیت را جمع یا باز کنید. مکالمه و کار دستیار متوقف نمی‌شوند.',
+    aresMaximize: 'نمای تمام‌صفحهٔ شخصیت را باز کنید یا از آن برگردید. بزرگ کردن، میکروفون را روشن نمی‌کند.',
+    aresClose: 'شخصیت را پنهان و منابع سه‌بعدی آن را آزاد کنید. صدا و کار هوش مصنوعی جدا هستند.',
+    aresRetry: 'بارگذاری شخصیت محلی را دوباره امتحان کنید. پیام دوباره ارسال یا سرویس صدا عوض نمی‌شود.',
+    aresMotion: 'حرکت شخصیت را متوقف یا ادامه دهید. صدا و کار هوش مصنوعی متوقف نمی‌شوند.',
+    aresLayoutButton: 'جای کارت، اندازه و زاویهٔ دوربین را تنظیم کنید یا آن را در نوار کناری قرار دهید.',
+    aresResize: 'برای تغییر اندازه، کارت شناور را بکشید. در کارت باریک از «چیدمان ← بزرگ‌تر یا کوچک‌تر» استفاده کنید.',
+    aresCameraHome: 'دوربین را روبه‌روی شخصیت برگردانید، بدون جابه‌جایی کارت.',
+    aresDock: 'شخصیت را در جای مخصوص بالای بخش‌های دیگر نوار کناری قرار دهید.',
+    aresReset: 'جای کارت و اندازهٔ آن را به پیش‌فرض برگردانید. گفت‌وگو بازنشانی نمی‌شود.',
+    settingsPhoneAccessButton: 'دسترسی خصوصی گوشی را روی رایانه مدیریت کنید. رایانه برای خدمت‌رسانی به گوشی باید بیدار و متصل بماند.',
+    phoneAccessRefresh: 'فهرست مرورگرهای متصل و وضعیت اتصال آن‌ها را تازه کنید.',
+    phoneAccessCode: 'این کد یک‌بارمصرف را فقط در گوشی خود وارد کنید. آن را به دیگران یا در گفت‌وگو نفرستید.',
+    checkAppUpdate: 'نسخهٔ سازگار را بررسی کنید. بررسی به‌تنهایی چیزی نصب نمی‌کند و کارها را از نو راه نمی‌اندازد.',
+    activityQuery: 'گفت‌وگوهای ثبت‌شده را جست‌وجو کنید. انتخاب کنید عنوان‌ها جست‌وجو شوند یا متن گفت‌وگو.',
+    activitySearchMode: 'انتخاب کنید تاریخچه بر اساس عنوان و پروژه جست‌وجو شود یا متن ثبت‌شدهٔ گفت‌وگو.',
+    activityStatus: 'بر اساس وضعیت ثبت‌شده در تاریخچه فیلتر کنید. ممکن است با وضعیت زندهٔ کار فرق داشته باشد.',
+    activitySearchSubmit: 'تاریخچهٔ محلی را با این فیلترها جست‌وجو کنید. این کار پرسش از هوش مصنوعی نیست.',
+    activityStartup: 'سرویس تاریخچهٔ موجود را در اجرای بعدی Seneschal شروع کنید. این گزینه راه‌اندازی Windows را تغییر نمی‌دهد و سرویس را همین حالا شروع نمی‌کند.'
+  };
+  for (const [id, copy] of Object.entries(helpFa)) {
+    const english = root.SeneschalFeatureHelp?.catalog[id];
+    if (english) { translations[english] = copy; folded[english.toLowerCase()] = copy; }
+  }
+  const ruleFa = [
+    null, null,
+    'فقط همین درخواست منتظرِ ابزار را مجاز کنید. ابتدا فرمان یا اقدام درخواستی را بررسی کنید.',
+    'برای اقدامات مشابه در همین گفت‌وگو اجازه را به خاطر بسپارید. این گزینه آزادی بیشتری از «فقط این بار» می‌دهد.',
+    'این درخواست ابزار را رد کنید. ابزار مجاز نمی‌شود؛ کار انجام‌شده به عقب برنمی‌گردد.',
+    'بررسی کنید رایانه تصمیم قبلی شما را دریافت کرده یا نه. تصمیم دوباره ارسال نمی‌شود.',
+    'خواندن امن خودکار باشد؛ ویرایش، فرمان و اقدامات خارجی اجازه بخواهند. برای اعمال، ذخیره کنید.',
+    'پیش از خواندن فایل و دیگر اقدامات ابزار اجازه بگیرد. محتاطانه‌تر است ولی وقفهٔ بیشتری دارد. برای اعمال، ذخیره کنید.',
+    'اجرا بتواند بدون پرسش فایل ویرایش و فرمان اجرا کند. فقط برای پروژهٔ مورد اعتماد؛ اقدامات خارجی همچنان اجازه می‌خواهند. برای اعمال، ذخیره کنید.',
+    'گفت‌وگوهای این پروژه را باز کنید و پوشهٔ آن را برای کار بعدی به کار ببرید.',
+    'نام پروژه در نوار کناری را عوض کنید، نه نام پوشهٔ روی دیسک.',
+    'پروژه را از نوار کناری بردارید. پوشه، فایل‌ها و گفت‌وگوهای موتور باقی می‌مانند.',
+    'این گفت‌وگوی ذخیره‌شده را باز کنید. پیام‌هایش دوباره ارسال نمی‌شوند.',
+    'این گفت‌وگو را برای دسترسی آسان بالا سنجاق کنید یا سنجاقش را بردارید.',
+    'گفت‌وگو را از فهرست معمولی پنهان کنید یا برگردانید. بایگانی تاریخچه را حذف نمی‌کند.',
+    'نام گفت‌وگوی ذخیره‌شده را عوض کنید، بدون تغییر پیام‌ها.',
+    'درخواست حذف همیشگی این گفت‌وگو را باز کنید. فایل‌های پروژه حذف نمی‌شوند.',
+    'به این درخواست برگردید و پاسخ تازه بسازید. پاسخ‌های بعدی از شاخهٔ فعال کنار می‌روند؛ پیش از تلاش دوباره بررسی کنید.',
+    'فقط از همین پاسخ انتخاب‌شده برای آماده‌سازی تابلو استفاده کنید. پیش از اجرا تیم را بررسی کنید.',
+    'پیام را برای دسترسی آسان سنجاق کنید یا سنجاق آن را بردارید.',
+    'این پیام را در نمای Seneschal همین دستگاه پنهان کنید یا برگردانید. رونوشت موتور حفظ می‌شود.',
+    'پیام را از Seneschal در همین دستگاه بردارید. رونوشت اصلی موتور تغییر نمی‌کند.',
+    'پیام را جمع یا باز کنید، بدون حذف یا اجرای دوبارهٔ آن.',
+    'این پیام را در فضای اصلی نمایش دهید یا به چیدمان معمولی برگردید.',
+    'این متن را کپی کنید. فرمانی اجرا یا متنی به سرویس دیگری ارسال نمی‌شود.',
+    'به پیام ذخیره‌شده در این گفت‌وگو بروید. چیزی دوباره ارسال یا اجرا نمی‌شود.',
+    'فرمان و نتیجهٔ ابزار را باز یا جمع کنید. دیدن نتیجهٔ تمام‌شده ابزار را دوباره اجرا نمی‌کند.',
+    'خلاصهٔ کوتاه پیشرفتِ ارائه‌شده از مدل را باز یا جمع کنید. این دسترسی به افکار خصوصی مدل نیست.',
+    'کارهای این پیام، مانند کپی، سنجاق و تلاش دوباره را ببینید. برای استفاده، یک مورد را انتخاب کنید.',
+    'پیشرفت و رویدادهای اخیر ابزارهای این گفت‌وگو را نشان دهید یا پنهان کنید.',
+    'این مدل را برای درخواست‌های بعدی انتخاب کنید. دسترسی، سهمیه و هزینهٔ ارائه‌دهنده همچنان اعمال می‌شود.',
+    'این درخواست نمونه را در کادر پیام بگذارید تا پیش از ارسال آن را بررسی یا ویرایش کنید.',
+    'این پیوست را از پیش‌نویس بردارید. فایل اصلی روی دیسک حذف نمی‌شود.',
+    'دستورالعمل‌ها را در محدودهٔ انتخابی ذخیره کنید. دستورالعمل اجازهٔ اضافی به ابزارها نمی‌دهد.',
+    'تغییرهای ذخیره‌نشدهٔ این ویرایشگر را کنار بگذارید و به نسخهٔ ذخیره‌شده برگردید.',
+    'متن پیش‌فرض پیشنهادی را در ویرایشگر بگذارید. پیش از ذخیره بررسی کنید.',
+    'دستورالعمل این مهارت را برای درخواست‌های بعدی فعال یا غیرفعال کنید. مهارت اجازهٔ اضافی به ابزار نمی‌دهد.',
+    'این مهارت را پیش از استفاده برای بررسی یا ویرایش دستورالعمل باز کنید.',
+    'این بخش کارگاه دستورالعمل‌ها را باز کنید. عوض کردن زبانه به‌تنهایی ویرایش‌ها را ذخیره نمی‌کند.',
+    'گفت‌وگوی بایگانی‌شده را به فهرست عادی نوار کناری برگردانید.',
+    'شخصیت شناور را کمی در این جهت جابه‌جا کنید. این گزینه شخصیت را نمی‌چرخاند.',
+    'کارت شناور شخصیت را بزرگ‌تر یا کوچک‌تر کنید، بدون تغییر گفت‌وگو.',
+    'دوربین را دور شخصیت بچرخانید. خود کارت جابه‌جا نمی‌شود.',
+    'این دنیا را برای پس‌زمینه انتخاب کنید. گفت‌وگو و پیش‌نویس تغییر نمی‌کنند.',
+    'این تعامل کوچک را در پس‌زمینهٔ محلی اجرا کنید. ابزار هوش مصنوعی اجرا یا صدا ضبط نمی‌شود.',
+    'تعامل پس‌زمینه را در این جزئیات مشخص‌شده اجرا کنید. جلوهٔ محلی است، نه کار هوش مصنوعی.',
+    'وظیفه، مدل و دسترسی این عامل را ویرایش کنید. پیش از ویرایش، عامل مشغول را متوقف کنید.',
+    'کارت عامل را از تابلو بردارید. کار در حال اجرا باید جداگانه متوقف شود.',
+    'وظیفهٔ این عامل را با مدل و دسترسی انتخابی آن اجرا کنید.',
+    'از این عامل بخواهید متوقف شود. تغییرهای انجام‌شده خودکار برنمی‌گردند.',
+    'گفت‌وگوی این عامل را باز کنید. دوباره اجرا نمی‌شود.',
+    'پیشرفت ثبت‌شده و کار ابزارهای این عامل را بررسی کنید.',
+    'تابلوی ذخیره‌شده را بدون اجرای دوبارهٔ عامل‌ها باز کنید.',
+    'این تابلو را از تاریخچهٔ تابلوها حذف کنید. پیش از حذف، تأیید را بررسی کنید.',
+    'این نتیجهٔ جست‌وجو را انتخاب کنید. مدل، گفت‌وگو و اقدام اثرهای متفاوتی دارند که در برچسب آن‌ها مشخص است.',
+    'نوار پروژه‌های گوشی را باز یا بسته کنید.',
+    'این بخش پیمایش را ببندید و به گفت‌وگو برگردید.',
+    'اتصال خصوصی این مرورگر را قطع کنید. کارهای رایانه متوقف نمی‌شوند.',
+    'ابزاری در دسترس این عامل است. اجرای آن همچنان تابع سیاست اجازه‌هاست.',
+    'تاریخچهٔ ثبت‌شدهٔ این گفت‌وگو را باز کنید. پیام یا ابزار دوباره اجرا نمی‌شود.',
+    'پیش از شروع عامل در حال ویرایش، منتظر پایان عامل انتخاب‌شده بمانید.',
+    'نشان می‌دهد این صفحه به موتور اجرای رایانه متصل است یا نه.',
+    'نشان می‌دهد گفت‌وگو آماده، مشغول کار یا در حال تلاش دوباره است.',
+    'مصرف ظرفیت همین گفت‌وگو را نشان می‌دهد، نه سهمیهٔ باقی‌ماندهٔ حساب.',
+    'ابزاری اجازه می‌خواهد. پیش از انتخاب «فقط این بار»، «همیشه» یا «رد درخواست»، اقدام را بررسی کنید.',
+    'دستیار پاسخ یک پرسش را می‌خواهد. پاسخ به پرسش با اجازهٔ اجرای ابزار فرق دارد.'
+  ];
+  (root.SeneschalFeatureHelp?.rules || []).forEach(([, english], index) => {
+    if (typeof english === 'string' && ruleFa[index]) translations[english] = ruleFa[index];
+  });
+  const sectionFa = {
+    permissions: 'بررسی کنید دستیار چه زمانی برای ابزارها اجازه بگیرد. درخواست منتظر همچنان به تصمیم صریح شما نیاز دارد.',
+    tools: 'ابزارهای در دسترس عامل فعلی را ببینید. در دسترس بودن به معنی اجازهٔ خودکار نیست.',
+    browser: 'مرورگر جداگانهٔ عامل را کنترل کنید. از نمایهٔ ذخیره‌شدهٔ مرورگر معمولی شما استفاده نمی‌کند.',
+    creative: 'دستیار را برای کار سه‌بعدی به Blender روی رایانه متصل کنید. ابزارهای آن تابع اجازه‌های شما هستند.',
+    code: 'پروژهٔ کاری را در ویرایشگر روی رایانه باز کنید. فایل و جای نشانگر را می‌توان جدا انتخاب کرد.',
+    budget: 'هدف هزینهٔ ارائه‌دهندهٔ پولی را بررسی کنید. سقف واقعی هزینه را در حساب خود ارائه‌دهنده هم تعیین کنید.',
+    providers: 'سرویس‌های هوش مصنوعی متصل و مدل‌های در دسترس آن‌ها را ببینید.',
+    pulse: 'فعالیت اخیر فضای کار و موتور را ببینید. تعداد فعالیت‌ها، سهمیهٔ باقی‌ماندهٔ مدل نیست.'
+  };
+  for (const [key, copy] of Object.entries(sectionFa)) { const english = root.SeneschalFeatureHelp?.sections[key]; if (english) translations[english] = copy; }
+  register(`
+Unmute the microphone. Talk can then capture and automatically send new spoken turns.|میکروفون را وصل کنید. حالت مکالمه می‌تواند گفتار جدید را ضبط و خودکار ارسال کند.
+Stop microphone capture without stopping the AI task. Unsent recorded audio is discarded; audio already sent cannot be taken back.|ضبط میکروفون را بدون توقف کار هوش مصنوعی قطع کنید. صدای ارسال‌نشده کنار گذاشته می‌شود؛ صدای قبلاً ارسال‌شده قابل پس گرفتن نیست.
+Let future replies play aloud again. Old muted replies will not be replayed.|پخش صوتی پاسخ‌های بعدی را دوباره فعال کنید. پاسخ‌های قبلی که بی‌صدا بودند تکرار نمی‌شوند.
+Stop spoken playback and keep future replies text-only until you unmute. The microphone and AI task are separate.|پخش صدا را قطع کنید؛ تا وصل دوباره، پاسخ‌های بعدی فقط متن‌اند. میکروفون و کار هوش مصنوعی جدا هستند.
+Close this panel without confirming its pending action. Changes already saved are not undone.|این پنل را بدون تأیید اقدام منتظر ببندید. تغییرهای قبلاً ذخیره‌شده برگردانده نمی‌شوند.
+Review app settings, model connections, voice, permissions and PC-only maintenance. Open a specific control to change it.|تنظیمات برنامه، اتصال مدل، صدا، اجازه‌ها و نگهداری مخصوص رایانه را بررسی کنید. برای تغییر، گزینهٔ مربوط را باز کنید.
+Set up one specialist’s name, task, model, system access and dependencies before running it.|پیش از اجرا، نام، وظیفه، مدل، دسترسی و وابستگی‌های یک عامل تخصصی را تنظیم کنید.
+Agent Context shows the current assistant, its permissions, tools and connected services.|بخش وضعیت عامل، دستیار فعلی، اجازه‌ها، ابزارها و سرویس‌های متصل را نشان می‌دهد.
+Choose the folder the assistant should work in. Project files stay on your PC.|پوشهٔ کاری دستیار را انتخاب کنید. فایل‌های پروژه روی رایانه می‌مانند.
+Conversations you pinned for quick access. Pinning does not copy or rerun them.|گفت‌وگوهایی که برای دسترسی سریع سنجاق کرده‌اید. سنجاق کردن آن‌ها را کپی یا دوباره اجرا نمی‌کند.
+Your saved conversations for this project. Open one to continue where you left off.|گفت‌وگوهای ذخیره‌شدهٔ این پروژه؛ برای ادامه از جای قبلی، یکی را باز کنید.
+The working project for this draft, plus controls for the size of the message input.|پروژهٔ کاری این پیش‌نویس و گزینه‌های اندازهٔ کادر پیام
+The current project and conversation name. This is separate from the AI model selected above.|نام پروژه و گفت‌وگوی فعلی؛ جدا از مدل هوش مصنوعی انتخاب‌شده در بالاست.
+Start private phone access on the PC. The PC must stay awake and connected; this is not a public internet link.|دسترسی خصوصی گوشی را روی رایانه شروع کنید. رایانه باید بیدار و متصل بماند؛ این پیوند عمومی اینترنت نیست.
+Stop phone access and revoke all paired browsers and unused codes. PC tasks and history stay intact.|دسترسی گوشی را متوقف و اتصال همهٔ مرورگرها و کدهای استفاده‌نشده را باطل کنید. کارهای رایانه و تاریخچه حفظ می‌شوند.
+Create a one-time code to pair your own browser. Keep this code private.|کد یک‌بارمصرف برای اتصال مرورگر خود بسازید. کد را محرمانه نگه دارید.
+Revoke this paired browser’s access. It must pair again before it can reconnect.|دسترسی این مرورگر را باطل کنید. برای اتصال دوباره باید کد تازه بگیرد.
+Manage which of your browsers may reach this PC through private phone access.|مرورگرهایی را مدیریت کنید که از راه دسترسی خصوصی گوشی به این رایانه می‌رسند.
+See a summary of recorded conversations and estimated usage.|خلاصهٔ گفت‌وگوهای ثبت‌شده و برآورد مصرف را ببینید.
+Find and inspect recorded conversations without rerunning them.|گفت‌وگوهای ثبت‌شده را بدون اجرای دوباره پیدا و بررسی کنید.
+Review recorded token usage and cost estimates. Estimates are not your provider’s final bill.|مصرف توکن و برآورد هزینه را ببینید. این برآورد، صورتحساب نهایی ارائه‌دهنده نیست.
+Manage the local history service and its derived index on the PC.|سرویس تاریخچهٔ محلی و فهرست ساخته‌شده از آن را روی رایانه مدیریت کنید.
+Reload recorded history and status without resending messages.|تاریخچه و وضعیت ثبت‌شده را بدون ارسال دوبارهٔ پیام‌ها تازه کنید.
+Start the local history service on the PC so the dashboard can read its records.|سرویس تاریخچه را روی رایانه شروع کنید تا داشبورد سوابق را بخواند.
+Stop the history service, not the AI’s current task. Saved conversations are kept.|سرویس تاریخچه را متوقف کنید، نه کار فعلی هوش مصنوعی. گفت‌وگوهای ذخیره‌شده می‌مانند.
+Restart the local history service. This is separate from restarting the task engine.|سرویس تاریخچهٔ محلی را دوباره راه‌اندازی کنید. با راه‌اندازی موتور اجرا فرق دارد.
+Rebuild the history index from original records. The previous index is preserved as a local backup.|فهرست تاریخچه را از سوابق اصلی دوباره بسازید. فهرست قبلی به‌صورت پشتیبان محلی حفظ می‌شود.
+Save whether history should start on future Seneschal launches. This does not immediately start it.|انتخاب شروع تاریخچه در اجرای بعدی Seneschal را ذخیره کنید. همین حالا شروع نمی‌شود.
+Save the live events shown in this window. Review the file before sharing it.|رویدادهای زندهٔ این پنجره را ذخیره کنید. پیش از اشتراک‌گذاری فایل را بررسی کنید.
+Pause or resume updates in this history view. The AI task continues.|تازه‌شدن این نمای تاریخچه را متوقف یا ادامه دهید. کار هوش مصنوعی ادامه دارد.
+Inspect this chat’s recorded activity without sending a new request.|فعالیت ثبت‌شدهٔ این گفت‌وگو را بدون ارسال درخواست جدید بررسی کنید.
+Check whether the PC’s history service is ready. This does not start a paid service.|آماده بودن سرویس تاریخچهٔ رایانه را بررسی کنید. سرویس پولی شروع نمی‌شود.
+Open the original conversation so you can continue it.|گفت‌وگوی اصلی را برای ادامه باز کنید.
+Show the previous page of history.|صفحهٔ قبلی تاریخچه را ببینید.
+Show the next page of history.|صفحهٔ بعدی تاریخچه را ببینید.
+Load more recorded turns from this conversation.|نوبت‌های ثبت‌شدهٔ بیشتری از این گفت‌وگو بارگذاری کنید.
+Remove the project filter from this history search.|فیلتر پروژه را از جست‌وجوی تاریخچه بردارید.
+Inspect this recorded conversation. Viewing history does not run its tasks again.|این گفت‌وگوی ثبت‌شده را بررسی کنید. دیدن تاریخچه کارهایش را دوباره اجرا نمی‌کند.
+Inspect recorded work and usage from the PC. Original conversation records stay separate from this dashboard.|کار و مصرف ثبت‌شدهٔ رایانه را ببینید. سوابق اصلی گفت‌وگو از این داشبورد جدا می‌مانند.
+Check for waiting questions. This does not send an answer or approve a tool.|پرسش‌های منتظر را بررسی کنید. پاسخ ارسال یا ابزار تأیید نمی‌شود.
+Reject this question request without choosing an answer. This is not a tool-permission decision.|درخواست پرسش را بدون انتخاب پاسخ رد کنید. این تصمیم دربارهٔ اجازهٔ ابزار نیست.
+Send only the answers you selected or wrote for this question.|فقط پاسخ‌های انتخاب‌شده یا نوشته‌شده برای همین پرسش را بفرستید.
+Open the waiting question so you can review its choices.|پرسش منتظر را باز کنید تا گزینه‌هایش را بررسی کنید.
+Choose or write an answer for the assistant. Only Send answers submits it; closing keeps it pending.|پاسخ دستیار را انتخاب کنید یا بنویسید. فقط «ارسال پاسخ‌ها» آن را می‌فرستد؛ بستن، پرسش را در انتظار نگه می‌دارد.
+Adjust this world’s colors, weather, lights and moving details. These are local visual effects.|رنگ، آب‌وهوا، نور و جزئیات متحرک دنیا را تنظیم کنید. این جلوه‌ها محلی هستند.
+Set an automatic wallpaper playlist. It waits when the workspace is hidden, paused or using a quiet conversation background.|گردش خودکار پس‌زمینه‌ها را تنظیم کنید. وقتی صفحه پنهان، حرکت متوقف یا پس‌زمینهٔ گفت‌وگو ثابت است منتظر می‌ماند.
+Adjust wallpaper visibility and motion so the background stays comfortable while you work.|نمایانی و حرکت پس‌زمینه را برای کار راحت‌تر تنظیم کنید.
+Choose a wallpaper from this collection. The art runs locally and does not use your AI allowance.|پس‌زمینه‌ای از این مجموعه انتخاب کنید. تصویر محلی اجرا می‌شود و سهمیهٔ هوش مصنوعی مصرف نمی‌کند.
+Review this group of settings. Hover or focus a specific control to learn what it changes.|این گروه تنظیمات را بررسی کنید. برای آشنایی با هر گزینه، روی آن مکث کنید یا با صفحه‌کلید به آن بروید.
+Expand or fold these details. This alone does not send a message or approve a tool.|جزئیات را باز یا جمع کنید. این کار پیام ارسال یا ابزار تأیید نمی‌کند.
+Open this link. External websites have their own privacy policies; review private information before sharing it.|پیوند را باز کنید. سایت‌های دیگر سیاست حریم خصوصی خود را دارند؛ پیش از اشتراک‌گذاری، اطلاعات خصوصی را بررسی کنید.
+Leave this dialog without confirming its pending action.|بدون تأیید اقدام منتظر از این پنجره خارج شوید.
+Save this revised request and generate a new response from this point. Later responses leave the active branch.|درخواست اصلاح‌شده را ذخیره و از این نقطه پاسخ تازه بسازید. پاسخ‌های بعدی از شاخهٔ فعال کنار می‌روند.
+Save this specialist’s task, model and access. Saving does not run it.|وظیفه، مدل و دسترسی عامل را ذخیره کنید. ذخیره کردن آن را اجرا نمی‌کند.
+Open the chosen file and position in Visual Studio Code on the PC.|فایل و محل انتخاب‌شده را در Visual Studio Code روی رایانه باز کنید.
+Save this sidebar label without renaming the actual folder.|برچسب نوار کناری را ذخیره کنید، بدون تغییر نام واقعی پوشه.
+Save the settings in this form. Review the values before confirming.|تنظیمات فرم را ذخیره کنید. پیش از تأیید، مقدارها را بررسی کنید.
+Install the selected compatible update only after reviewing it. A running task may need to finish first.|پس از بررسی، به‌روزرسانی سازگار را نصب کنید. ممکن است لازم باشد کار در حال اجرا ابتدا تمام شود.
+Review local app maintenance and compatibility information.|اطلاعات نگهداری و سازگاری برنامهٔ محلی را بررسی کنید.
+Change this field’s setting. Its label and nearby note explain the expected value; typing alone does not send a chat message.|تنظیم این فیلد را تغییر دهید. برچسب و یادداشت کناری مقدار لازم را توضیح می‌دهند؛ تایپ به‌تنهایی پیام نمی‌فرستد.
+Use this action in the current panel. Review the nearby information before confirming a change.|این اقدام را در همین بخش به کار ببرید. پیش از تأیید تغییر، اطلاعات کناری را بررسی کنید.
+`);
+  register(`
+Open workspace home|باز کردن صفحهٔ اصلی
+Select AI model|انتخاب مدل هوش مصنوعی
+Active AI model|مدل هوش مصنوعی فعال
+Search models|جست‌وجوی مدل‌ها
+Search models…|جست‌وجوی مدل‌ها…
+Close model picker|بستن انتخاب مدل
+Available AI models|مدل‌های موجود
+Search workspace|جست‌وجوی فضای کار
+Open Agent Board|باز کردن تابلوی عامل‌ها
+Switch color theme|تغییر رنگ‌بندی
+Switch day or night theme|تغییر رنگ‌بندی روز و شب
+Seneschal settings|تنظیمات Seneschal
+Exit maximized message view|خروج از نمای بزرگ پیام
+Exit maximized view (Esc)|خروج از نمای بزرگ (Esc)
+Minimize left projects and sessions panel|جمع کردن نوار پروژه‌ها و گفت‌وگوها در چپ
+Restore left projects and sessions panel|باز کردن نوار پروژه‌ها و گفت‌وگوها در چپ
+Minimize left panel|جمع کردن نوار چپ
+Restore left panel|باز کردن نوار چپ
+Show archived sessions|نمایش گفت‌وگوهای بایگانی‌شده
+Hide archived sessions|پنهان کردن گفت‌وگوهای بایگانی‌شده
+Open wallpaper themes|باز کردن پس‌زمینه‌ها
+Wallpaper themes|پس‌زمینه‌ها
+Open the official Work and Codex usage dashboard|باز کردن داشبورد رسمی مصرف Work و Codex
+Rename session|تغییر نام گفت‌وگو
+Move session to another project|قرار دادن گفت‌وگو زیر پروژهٔ دیگر
+Export conversation|ذخیرهٔ خروجی گفت‌وگو
+Send current session to Agent Board|فرستادن گفت‌وگوی فعلی به تابلوی عامل‌ها
+Send this session to Agent Board|فرستادن این گفت‌وگو به تابلوی عامل‌ها
+Open current project in Visual Studio Code|باز کردن پروژهٔ فعلی در Visual Studio Code
+Open project in VS Code|باز کردن پروژه در VS Code
+Show archived messages|نمایش پیام‌های بایگانی‌شده
+Hide archived messages|پنهان کردن پیام‌های بایگانی‌شده
+Stop generation|توقف تولید پاسخ
+Conversation steps|گام‌های گفت‌وگو
+Permissions and questions|اجازه‌ها و پرسش‌ها
+Minimize message input|جمع کردن کادر پیام
+Maximize message input|بزرگ کردن کادر پیام
+Restore message input|بازگردانی کادر پیام
+Expand prompt|باز کردن کادر نوشتن
+Message Seneschal|پیام به Seneschal
+Describe the desired state, ask a question, or use / for commands…|درخواستتان را بنویسید، سؤال بپرسید یا برای فرمان‌ها / بزنید…
+Attach files|پیوست فایل‌ها
+Prompt options|گزینه‌های پیام
+Agent, thinking and skills|عامل، میزان بررسی و مهارت‌ها
+Agent mode|حالت عامل
+Model thinking level|میزان بررسی مدل
+Open Instructions Studio|باز کردن کارگاه دستورالعمل‌ها
+Choose instructions and skills|انتخاب دستورالعمل و مهارت
+Open agent browser controls|باز کردن تنظیمات مرورگر عامل
+Give the agent a browser task|دادن یک کار مرورگری به عامل
+Show the agent-controlled Brave window|نمایش پنجرهٔ Brave تحت کنترل عامل
+Hide the agent-controlled Brave window|پنهان کردن پنجرهٔ Brave تحت کنترل عامل
+Voice and message actions|گزینه‌های صدا و پیام
+Show or hide Seneschal companion|نمایش یا پنهان کردن شخصیت Seneschal
+Start Talk mode|شروع حالت مکالمه
+Stop Talk mode|پایان حالت مکالمه
+Start Talk — sends spoken turns and reads replies|شروع مکالمه؛ ارسال خودکار گفتار و خواندن پاسخ
+Voice options|گزینه‌های صدا
+Talk audio controls|کنترل صدای مکالمه
+Audio privacy controls|کنترل حریم خصوصی صدا
+Start voice dictation or recording|شروع دیکته یا ضبط صدا
+Dictate or record a voice message|نوشتن با گفتار یا ضبط پیام صوتی
+Start turn-by-turn voice conversation|شروع مکالمهٔ صوتی نوبت‌به‌نوبت
+Send message|ارسال پیام
+Send message (Enter); Shift Enter for a new line|ارسال پیام با Enter؛ خط جدید با Shift Enter
+Minimize right agent context panel|جمع کردن نوار وضعیت عامل در راست
+Restore right agent context panel|باز کردن نوار وضعیت عامل در راست
+Minimize right panel|جمع کردن نوار راست
+Restore right panel|باز کردن نوار راست
+Close inspector|بستن وضعیت عامل
+Activity during the last 60 seconds|فعالیت در ۶۰ ثانیهٔ گذشته
+OpenCode work and ambient events during the last minute, shown in ten fixed six-second intervals|رویدادهای کاری و پس‌زمینهٔ OpenCode در دقیقهٔ گذشته، در ده بازهٔ شش‌ثانیه‌ای
+Open agent context|باز کردن وضعیت عامل
+Close atmosphere collection|بستن مجموعهٔ پس‌زمینه‌ها
+Atmosphere customization|تنظیم پس‌زمینه
+Scene interactions|تعامل‌های صحنه
+Return to atmosphere collection|بازگشت به مجموعهٔ پس‌زمینه‌ها
+Clickable scene details|جزئیات تعاملی صحنه
+Paste the provider API key|کلید API ارائه‌دهنده را وارد کنید
+Close Instructions Studio|بستن کارگاه دستورالعمل‌ها
+Instruction sections|بخش‌های دستورالعمل
+Describe the assistant's identity, tone, and preferred form of address.|هویت، لحن و شیوهٔ خطاب دستیار را توضیح دهید.
+Add permanent preferences, safety rules, and communication style.|ترجیح‌های دائمی، قوانین ایمنی و سبک ارتباط را اضافه کنید.
+Describe this project's purpose, structure, standards, tests, and forbidden changes.|هدف، ساختار، استانداردها، آزمایش‌ها و تغییرهای ممنوع پروژه را توضیح دهید.
+Close Agent Board|بستن تابلوی عامل‌ها
+What should this team deliver?|این تیم چه نتیجه‌ای باید تحویل دهد؟
+Maximum parallel agents|حداکثر عامل‌های هم‌زمان
+Close board history|بستن تاریخچهٔ تابلوها
+Researcher|پژوهشگر
+Give this agent one clear responsibility and expected output.|یک مسئولیت روشن و خروجی مورد انتظار را برای این عامل بنویسید.
+Seneschal voice companion|شخصیت همراه صوتی Seneschal
+Move Seneschal; drag or use arrow keys|جابه‌جایی Seneschal؛ بکشید یا از کلیدهای جهت استفاده کنید
+Drag to move; arrow keys also move|برای جابه‌جایی بکشید؛ کلیدهای جهت هم کار می‌کنند
+Minimize Seneschal|جمع کردن شخصیت Seneschal
+Restore Seneschal|بازگردانی شخصیت Seneschal
+Maximize Seneschal|تمام‌صفحه کردن شخصیت Seneschal
+Hide Seneschal companion|پنهان کردن شخصیت Seneschal
+Seneschal 3D view; drag to rotate the camera, or use arrow keys|نمای سه‌بعدی Seneschal؛ برای چرخش دوربین بکشید یا کلید جهت بزنید
+Pause Seneschal motion|توقف حرکت Seneschal
+Resume Seneschal motion|ادامهٔ حرکت Seneschal
+Companion audio controls|کنترل صدای شخصیت
+Reset Seneschal camera to front view|بازگردانی دوربین به نمای روبه‌رو
+Resize Seneschal; drag or use arrow keys|تغییر اندازهٔ Seneschal؛ بکشید یا کلید جهت بزنید
+Drag to resize; arrow keys also resize|برای تغییر اندازه بکشید؛ کلیدهای جهت هم کار می‌کنند
+Seneschal position, size and camera|جای کارت، اندازه و دوربین Seneschal
+Move Seneschal left|جابه‌جایی Seneschal به چپ
+Move Seneschal up|جابه‌جایی Seneschal به بالا
+Move Seneschal down|جابه‌جایی Seneschal به پایین
+Move Seneschal right|جابه‌جایی Seneschal به راست
+Rotate camera left|چرخش دوربین به چپ
+Rotate camera up|چرخش دوربین به بالا
+Rotate camera down|چرخش دوربین به پایین
+Rotate camera right|چرخش دوربین به راست
+Full-screen Seneschal voice companion|شخصیت همراه Seneschal در نمای تمام‌صفحه
+Sending your decision…|در حال ارسال تصمیم شما…
+Checking approval status… No decision is being sent.|در حال بررسی وضعیت اجازه… تصمیمی ارسال نمی‌شود.
+Could not confirm your reply. Nothing was resent. Check status before trying again.|پاسخ شما تأیید نشد. چیزی دوباره ارسال نشد. پیش از تلاش دوباره وضعیت را بررسی کنید.
+Remember this approval for this session|این اجازه را برای همین گفت‌وگو به خاطر بسپار
+Requested action|اقدام درخواستی
+↓ Latest|↓ آخرین پیام
+Scroll to the end of this chat|رفتن به پایان این گفت‌وگو
+Scroll to latest message|رفتن به آخرین پیام
+Just now|همین حالا
+Untitled session|گفت‌وگوی بدون نام
+No sessions yet.|هنوز گفت‌وگویی وجود ندارد.
+No pinned sessions.|هنوز گفت‌وگویی سنجاق نشده.
+No pinned messages.|هنوز پیامی سنجاق نشده.
+No projects yet.|هنوز پروژه‌ای وجود ندارد.
+No archived sessions.|گفت‌وگوی بایگانی‌شده‌ای وجود ندارد.
+No models found.|مدلی پیدا نشد.
+Connect a provider|اتصال ارائه‌دهنده
+Text + vision · chat only|متن + تصویر · فقط گفت‌وگو
+Text · chat only|متن · فقط گفت‌وگو
+Text + reasoning · chat only|متن + بررسی · فقط گفت‌وگو
+Text|متن
+Vision|تصویر
+Reasoning|بررسی
+Tools|ابزارها
+Connected|متصل
+Retrying|تلاش دوباره
+Reconnecting|اتصال دوباره
+Waiting|در انتظار
+Recording|در حال ضبط
+Preparing|در حال آماده‌سازی
+Paused|متوقف
+Mic muted|میکروفون قطع
+Speaker muted|صدای خروجی قطع
+Talk · Listening|مکالمه · در حال شنیدن
+Talk · Thinking|مکالمه · در حال بررسی
+Talk · Speaking|مکالمه · در حال صحبت
+Talk · Ready|مکالمه · آماده
+Talk · Muted|مکالمه · بی‌صدا
+Stop recording|توقف ضبط
+Stop dictation|توقف دیکته
+Hold to record|برای ضبط نگه دارید
+Hold to talk|برای صحبت نگه دارید
+Release to send|برای ارسال رها کنید
+Uses your current conversation and voice service.|از گفت‌وگو و سرویس صدای فعلی شما استفاده می‌کند.
+Enter to send · Shift Enter for line|Enter برای ارسال · Shift Enter برای خط جدید
+`);
+  register(`
+Project:|پروژه:
+On|روشن
+Off|خاموش
+Processing|در حال پردازش
+Sending|در حال ارسال
+Talk active|مکالمه فعال است
+Mic active|میکروفون فعال است
+Stop listening|توقف شنیدن
+Stop voice dictation or recording|توقف دیکته یا ضبط صدا
+Start Talk — sends spoken turns and reads replies. Use the arrow for options.|شروع مکالمه؛ گفتار خودکار ارسال و پاسخ خوانده می‌شود. تنظیمات با پیکان باز می‌شود.
+Talk mode stopped.|مکالمه متوقف شد.
+Send or clear the current draft before starting Talk mode.|پیش از شروع مکالمه، پیش‌نویس فعلی را ارسال یا پاک کنید.
+Choose a project and connect a model before starting Talk mode.|پیش از شروع مکالمه، یک پروژه و مدل متصل انتخاب کنید.
+Accept the NVIDIA cloud-audio notice inside Voice first.|ابتدا در بخش صدا، اطلاعیهٔ ارسال صدا به ابر NVIDIA را تأیید کنید.
+Accept the NVIDIA cloud-audio notice in Voice first.|ابتدا در بخش صدا، اطلاعیهٔ ارسال صدا به ابر NVIDIA را تأیید کنید.
+Talk mode needs current Chrome or Edge speech recognition.|حالت مکالمه به تشخیص گفتار نسخهٔ جدید Chrome یا Edge نیاز دارد.
+Talk mode needs current Chrome or Edge with microphone access.|مکالمه به Chrome یا Edge جدید با اجازهٔ میکروفون نیاز دارد.
+Talk mode is on — speak naturally, My Lord. Click Voice again to stop; use its arrow for options.|مکالمه روشن است؛ طبیعی صحبت کنید. برای پایان، دوباره «صدا» را بزنید؛ تنظیمات با پیکان باز می‌شود.
+This browser does not provide microphone recording. Open the workspace in current Chrome or Edge.|این مرورگر ضبط میکروفون ندارد. فضای کار را در Chrome یا Edge جدید باز کنید.
+The voice recording could not be completed.|ضبط صدا کامل نشد.
+Voice message attached — send it when ready.|پیام صوتی پیوست شد؛ هر وقت آماده بودید ارسال کنید.
+Recording voice message — open Voice to finish recording.|پیام صوتی در حال ضبط است؛ برای پایان ضبط بخش صدا را باز کنید.
+Microphone access was blocked. Allow it in the browser and try again.|دسترسی میکروفون مسدود است. در مرورگر اجازه دهید و دوباره امتحان کنید.
+Microphone is muted. Unmute it in Voice before dictating.|میکروفون قطع است. پیش از دیکته آن را در بخش صدا وصل کنید.
+NVIDIA speech uses Talk. Choose Browser voice to use Dictate or attach a recording.|گفتار NVIDIA از حالت مکالمه استفاده می‌کند. برای دیکته یا پیوست ضبط، صدای مرورگر را انتخاب کنید.
+Listening — open Voice and choose Stop listening when finished.|در حال شنیدن؛ وقتی تمام شد، بخش صدا را باز و «توقف شنیدن» را انتخاب کنید.
+Checking voice access…|در حال بررسی دسترسی صدا…
+NVIDIA voice is available. English speech trial; remaining free quota is not reported. Use Talk to begin.|صدای NVIDIA در دسترس است. این آزمایش گفتار انگلیسی است؛ سهمیهٔ رایگان باقی‌مانده گزارش نمی‌شود. با «مکالمه» شروع کنید.
+The selected NVIDIA voice is unavailable. Nothing was recorded.|صدای انتخابی NVIDIA در دسترس نیست. چیزی ضبط نشد.
+NVIDIA voice could not complete. No fallback was used.|گفتار NVIDIA کامل نشد. سرویس جایگزینی استفاده نشد.
+The running Seneschal host has not loaded NVIDIA voice. Finish active tasks, restart Seneschal on the PC, then reload this page. Nothing was switched to another service.|میزبان فعلی صدای NVIDIA را بارگذاری نکرده است. پس از پایان کارها، Seneschal را روی رایانه دوباره اجرا و این صفحه را تازه کنید. سرویس دیگری جایگزین نشده.
+This browser does not support NVIDIA microphone capture.|این مرورگر ضبط میکروفون برای NVIDIA را پشتیبانی نمی‌کند.
+Loading Seneschal…|در حال بارگذاری Seneschal…
+Approval required — review the request above the message box.|اجازه لازم است؛ درخواست بالای کادر پیام را بررسی کنید.
+The PC still lists this approval. Choose a decision again only if you intend to send it.|این درخواست هنوز روی رایانه منتظر است. فقط اگر قصد ارسال تصمیم را دارید، دوباره انتخاب کنید.
+Could not confirm the approval reply. Nothing was resent. Use Check status before trying again.|پاسخ اجازه تأیید نشد. چیزی دوباره ارسال نشد. پیش از تلاش دوباره «بررسی وضعیت» را بزنید.
+Approval policy saved. Close and reopen Seneschal to activate it.|سیاست اجازه‌ها ذخیره شد. برای فعال شدن، Seneschal را ببندید و دوباره باز کنید.
+Offline. PC tasks may still be running. Reconnecting when your connection returns…|اتصال قطع است. کارهای رایانه ممکن است ادامه داشته باشند. پس از برگشت ارتباط، اتصال دوباره انجام می‌شود…
+Reconnecting to the PC… Your messages will not be resent.|در حال اتصال دوباره به رایانه… پیام‌های شما دوباره ارسال نمی‌شوند.
+Connected. Catching up with the latest messages and task status…|متصل شد. در حال دریافت آخرین پیام‌ها و وضعیت کار…
+Phone access expired or was revoked. Open the pairing page to reconnect.|دسترسی گوشی منقضی یا باطل شده. برای اتصال دوباره صفحهٔ اتصال را باز کنید.
+Access expired. Reopen Seneschal from its PC launcher.|دسترسی منقضی شده. Seneschal را از راه‌انداز روی رایانه دوباره باز کنید.
+Sign in again|ورود دوباره
+Pair this browser|اتصال این مرورگر
+Workspace refreshed.|فضای کار تازه شد.
+Session renamed.|نام گفت‌وگو تغییر کرد.
+Conversation exported to Downloads.|خروجی گفت‌وگو در پوشهٔ دانلودها ذخیره شد.
+Session pinned to the top.|گفت‌وگو در بالا سنجاق شد.
+Session unpinned.|سنجاق گفت‌وگو برداشته شد.
+Session archived locally.|گفت‌وگو در این رابط بایگانی شد.
+Session restored.|گفت‌وگو بازگردانی شد.
+Restore this session before pinning it.|پیش از سنجاق کردن، گفت‌وگو را بازگردانی کنید.
+Stop this session before archiving it.|پیش از بایگانی، کار این گفت‌وگو را متوقف کنید.
+Showing archived messages.|پیام‌های بایگانی‌شده نمایش داده می‌شوند.
+Archived messages hidden.|پیام‌های بایگانی‌شده پنهان شدند.
+Enter a project name.|نام پروژه را وارد کنید.
+Use 80 characters or fewer without control characters.|حداکثر ۸۰ نویسه، بدون نویسه‌های کنترلی وارد کنید.
+Unsaved changes|تغییرهای ذخیره‌نشده
+Needs attention|نیاز به بررسی
+Chat mode enabled. All tools and system actions are off.|حالت گفت‌وگو فعال شد. همهٔ ابزارها و اقدامات سیستم خاموش‌اند.
+Close without saving your latest instruction edits?|بدون ذخیرهٔ آخرین تغییرهای دستورالعمل بسته شود؟
+Reset the Agent Board? Linked OpenCode sessions will remain available in Sessions.|تابلوی عامل‌ها بازنشانی شود؟ گفت‌وگوهای مرتبط OpenCode در فهرست گفت‌وگوها می‌مانند.
+Create a new board from this response? The current board stays available in History.|از این پاسخ تابلوی تازه‌ای ساخته شود؟ تابلوی فعلی در تاریخچه باقی می‌ماند.
+Replace the current worker agents with the starter team? Imported source sessions and all linked sessions will remain.|عامل‌های کاری فعلی با تیم اولیه جایگزین شوند؟ گفت‌وگوهای واردشده و همهٔ گفت‌وگوهای مرتبط باقی می‌مانند.
+This conversation has saved tool overrides from an earlier request. Use the configured permission policy for this message instead? This replaces its earlier tool overrides when the message is submitted, keeps its messages and files, and does not change other conversations. Cancel sends nothing.|این گفت‌وگو از درخواست قبلی دسترسی‌های ویژهٔ ابزار دارد. برای این پیام از سیاست اجازه‌های تنظیم‌شده استفاده شود؟ هنگام ارسال پیام، آن دسترسی‌های قبلی جایگزین می‌شوند؛ پیام‌ها و فایل‌ها حفظ می‌شوند و گفت‌وگوهای دیگر تغییر نمی‌کنند. با انصراف چیزی ارسال نمی‌شود.
+Questions could not load. No answer or approval was sent.|پرسش‌ها بارگذاری نشدند. پاسخ یا اجازه‌ای ارسال نشده است.
+Questions could not load. Check the PC connection, then refresh questions. No answer or approval was sent.|پرسش‌ها بارگذاری نشدند. اتصال رایانه را بررسی و سپس پرسش‌ها را تازه کنید. پاسخ یا اجازه‌ای ارسال نشده است.
+Questions need a fresh sign-in or phone pairing. Reconnect, then refresh questions. Approvals are separate.|پرسش‌ها به ورود یا اتصال دوبارهٔ گوشی نیاز دارند. دوباره متصل و سپس پرسش‌ها را تازه کنید. اجازهٔ ابزار جداست.
+This engine does not expose the question service. Tool approvals are separate and still require your decision.|این موتور سرویس پرسش را ارائه نمی‌کند. اجازه‌های ابزار جدا هستند و همچنان تصمیم شما را می‌خواهند.
+The engine returned a question format this app cannot display. Refresh questions or use Classic OpenCode. Tool approvals are separate.|قالب پرسش موتور قابل‌نمایش نیست. پرسش‌ها را تازه یا از رابط اصلی OpenCode استفاده کنید. اجازهٔ ابزار جداست.
+The question service is temporarily unavailable. Refresh questions to retry. No answer or approval was sent.|سرویس پرسش موقتاً در دسترس نیست. برای تلاش دوباره تازه‌سازی کنید. پاسخ یا اجازه‌ای ارسال نشده است.
+SENESCHAL · LOCAL ACTIVITY|Seneschal · فعالیت‌های محلی
+A record of your work|روایتی از کارهای شما
+Explore sessions, inspect tools, and understand usage.|گفت‌وگوها و ابزارها را بررسی کنید و مصرف را بهتر بشناسید.
+Refresh history|تازه‌سازی تاریخچه
+Close Activity|بستن فعالیت‌ها
+Activity views|نماهای فعالیت
+Overview|نمای کلی
+Usage|مصرف
+Service|سرویس
+Stored on this computer|ذخیره‌شده روی این رایانه
+Powered by Agent Trail|با پشتیبانی Agent Trail
+Local history|تاریخچهٔ محلی
+Inspect current chat|بررسی گفت‌وگوی فعلی
+Live agent activity|فعالیت زندهٔ عامل
+Latest progress for this chat|آخرین پیشرفت این گفت‌وگو
+Inspect history|بررسی تاریخچه
+History ready|تاریخچه آماده است
+Indexing|در حال فهرست‌سازی
+Starting|در حال شروع
+History incomplete|تاریخچه ناقص است
+Service unavailable|سرویس در دسترس نیست
+Stopping|در حال توقف
+Checking service|بررسی سرویس
+Period|بازه
+Today|امروز
+Last 7 days|۷ روز اخیر
+Last 30 days|۳۰ روز اخیر
+All history|همهٔ تاریخچه
+Total tokens|کل توکن‌ها
+Input tokens|توکن‌های ورودی
+Output tokens|توکن‌های خروجی
+Cache read|خواندن حافظهٔ موقت
+Cache write|نوشتن حافظهٔ موقت
+Estimated cost|هزینهٔ برآوردی
+Active sessions|گفت‌وگوهای فعال
+No ranking records available.|اطلاعات رتبه‌بندی موجود نیست.
+No daily usage records available.|مصرف روزانه‌ای ثبت نشده.
+Usage and estimates|مصرف و برآوردها
+Your recent work|کارهای اخیر شما
+Recorded consumption from OpenCode sessions.|مصرف ثبت‌شدهٔ گفت‌وگوهای OpenCode
+A local overview of sessions and recorded usage.|نمای کلی محلی از گفت‌وگوها و مصرف ثبت‌شده
+Sessions started|گفت‌وگوهای شروع‌شده
+Includes worker sessions|شامل گفت‌وگوهای عامل‌های کاری
+Recorded tokens|توکن‌های ثبت‌شده
+Usage recorded in this period|مصرف ثبت‌شده در این بازه
+Recorded token activity|روند مصرف توکن
+All indexed days|همهٔ روزهای ثبت‌شده
+7 days|۷ روز
+30 days|۳۰ روز
+Token categories|دسته‌های توکن
+Input|ورودی
+Output|خروجی
+Reasoning tokens|توکن‌های بررسی
+Models · session attribution|مدل‌ها · بر اساس گفت‌وگو
+Projects · sessions started|پروژه‌ها · گفت‌وگوهای شروع‌شده
+Recently updated sessions|گفت‌وگوهای تازه به‌روز‌شده
+View all sessions|دیدن همهٔ گفت‌وگوها
+No indexed sessions yet.|هنوز گفت‌وگویی فهرست نشده.
+Live progress in this window|پیشرفت زنده در این پنجره
+Export live events|ذخیرهٔ رویدادهای زنده
+Resume view|ادامهٔ تازه‌سازی نما
+Pause view|توقف تازه‌سازی نما
+Session history|تاریخچهٔ گفت‌وگوها
+Search titles and projects, or find text within recorded conversations.|عنوان و پروژه را جست‌وجو کنید، یا متن گفت‌وگوهای ثبت‌شده را پیدا کنید.
+Find a session…|پیدا کردن گفت‌وگو…
+Search in|جست‌وجو در
+Titles and projects|عنوان‌ها و پروژه‌ها
+Conversation text|متن گفت‌وگو
+Recorded status|وضعیت ثبت‌شده
+All statuses|همهٔ وضعیت‌ها
+Clear project filter|برداشتن فیلتر پروژه
+Conversation search shows up to 50 matching sessions. Refine the text for more specific results.|جست‌وجوی متن حداکثر ۵۰ گفت‌وگوی مرتبط نشان می‌دهد. برای نتیجهٔ دقیق‌تر، متن جست‌وجو را مشخص‌تر کنید.
+Includes ordinary chats and worker sessions. Status is recorded history; it may differ from a currently running task.|شامل گفت‌وگوهای عادی و عامل‌های کاری است. وضعیت، مربوط به تاریخچه است و ممکن است با کار زنده فرق کند.
+No matching sessions|گفت‌وگویی پیدا نشد
+Change your filters or search text.|فیلترها یا متن جست‌وجو را تغییر دهید.
+History is still indexing. Refresh shortly.|تاریخچه هنوز فهرست می‌شود. کمی بعد تازه‌سازی کنید.
+Refresh history after running an OpenCode session.|پس از اجرای یک گفت‌وگوی OpenCode، تاریخچه را تازه کنید.
+Arguments|ورودی ابزار
+Recorded output|خروجی ثبت‌شده
+No output recorded.|خروجی ثبت نشده.
+Inspect child session|بررسی گفت‌وگوی زیرمجموعه
+Reasoning record is redacted.|گزارش بررسی پوشانده شده است.
+Recorded reasoning summary|خلاصهٔ ثبت‌شدهٔ بررسی
+Loading session history|بارگذاری تاریخچهٔ گفت‌وگو
+Retrieving the recorded conversation…|دریافت گفت‌وگوی ثبت‌شده…
+← Session history|→ تاریخچهٔ گفت‌وگو
+Open chat|باز کردن گفت‌وگو
+Parent session|گفت‌وگوی والد
+This record is incomplete or contains a compaction boundary.|این سابقه ناقص است یا بخشی از گفت‌وگو در آن فشرده شده است.
+Latest live progress|آخرین پیشرفت زنده
+Captured in this window|ثبت‌شده در این پنجره
+Incomplete|ناقص
+No turns indexed yet|هنوز نوبتی فهرست نشده
+Refresh history to pick up the latest recorded messages.|برای دریافت آخرین پیام‌های ثبت‌شده، تاریخچه را تازه کنید.
+Load more turns|بارگذاری نوبت‌های بیشتر
+PC history service|سرویس تاریخچهٔ رایانه
+Checking the PC…|بررسی رایانه…
+History is available|تاریخچه در دسترس است
+Use Overview, Sessions or Usage to explore the PC history index.|برای دیدن تاریخچهٔ رایانه از نمای کلی، گفت‌وگوها یا مصرف استفاده کنید.
+Waiting for PC history|در انتظار تاریخچهٔ رایانه
+On your PC, open Activity → Service and enable “Start Activity with Seneschal”. Prepare local history once on the PC if needed. This phone will load the dashboard when the service is available.|در رایانه بخش فعالیت‌ها ← سرویس را باز و «شروع فعالیت‌ها همراه Seneschal» را فعال کنید. در صورت نیاز تاریخچهٔ محلی را یک‌بار آماده کنید. گوشی پس از آماده شدن سرویس، داشبورد را بارگذاری می‌کند.
+Check PC status|بررسی وضعیت رایانه
+Available from your phone|در دسترس از گوشی
+Start Activity with Seneschal|شروع فعالیت‌ها همراه Seneschal
+Save startup preference|ذخیرهٔ تنظیم شروع خودکار
+Loading startup preference…|بارگذاری تنظیم شروع خودکار…
+Saving startup preference…|ذخیرهٔ تنظیم شروع خودکار…
+Not recorded|ثبت نشده
+Rebuild the local history index? The previous index will be backed up, and recorded history will be imported again.|فهرست محلی تاریخچه دوباره ساخته شود؟ از فهرست قبلی پشتیبان گرفته و تاریخچهٔ ثبت‌شده دوباره وارد می‌شود.
+SENESCHAL · PC CONTROL|Seneschal · کنترل رایانه
+Private phone access|دسترسی خصوصی گوشی
+Start, stop and pair|شروع، توقف و اتصال
+PC-only controls · no automatic startup|فقط روی رایانه · بدون شروع خودکار
+Phone access|دسترسی گوشی
+Close phone access|بستن دسترسی گوشی
+Checking gateway…|بررسی درگاه…
+Closing the Seneschal window does|بستن پنجرهٔ Seneschal
+not|نمی‌تواند
+stop the PC host. Your PC must stay awake and connected. Docker is only needed for verification.|میزبان رایانه را متوقف کند. رایانه باید بیدار و متصل بماند. Docker فقط برای بررسی صحت لازم است.
+Start phone access|شروع دسترسی گوشی
+Pair a browser|اتصال مرورگر
+Stop phone access|توقف دسترسی گوشی
+Stop revokes every paired browser and unused code. It does not cancel PC tasks, delete history or remove the private Tailscale mapping.|توقف، اتصال همهٔ مرورگرها و کدهای استفاده‌نشده را باطل می‌کند. کارهای رایانه لغو، تاریخچه حذف یا مسیر خصوصی Tailscale برداشته نمی‌شود.
+Open on your phone|در گوشی باز کنید
+Keep Tailscale connected on both devices. This control does not create a network mapping.|Tailscale را در هر دو دستگاه متصل نگه دارید. این گزینه مسیر شبکه ایجاد نمی‌کند.
+One-time code · enter only on your phone|کد یک‌بارمصرف · فقط در گوشی وارد کنید
+Single use. Expires in 10 minutes. Do not paste or screenshot this code into chat.|یک‌بارمصرف؛ پس از ۱۰ دقیقه منقضی می‌شود. کد یا تصویر آن را در گفت‌وگو نفرستید.
+Paired browsers|مرورگرهای متصل
+Gateway running|درگاه فعال است
+Gateway stopped|درگاه متوقف است
+Gateway status unknown|وضعیت درگاه نامشخص است
+Setup needs review|تنظیمات نیاز به بررسی دارد
+Private setup needed|راه‌اندازی خصوصی لازم است
+No active paired browsers.|مرورگر متصل فعالی وجود ندارد.
+Active browsers can be checked when the gateway is running.|وقتی درگاه فعال باشد، مرورگرهای متصل قابل‌بررسی هستند.
+Revoke|لغو دسترسی
+Working…|در حال انجام…
+The displayed code expired. Request a new code on this PC.|کد نمایش‌داده‌شده منقضی شد. روی همین رایانه کد تازه بخواهید.
+New code ready. Any earlier unused code is no longer valid.|کد تازه آماده است. کدهای قبلی استفاده‌نشده دیگر معتبر نیستند.
+Browser revoked. PC tasks continue.|دسترسی مرورگر لغو شد. کارهای رایانه ادامه دارند.
+Status check timed out. Refresh to check again; no action was retried.|زمان بررسی وضعیت تمام شد. تازه‌سازی کنید؛ اقدامی دوباره اجرا نشد.
+Action timed out and may have completed. Refresh the status before trying again; nothing was automatically retried.|مهلت تمام شد و ممکن است اقدام انجام شده باشد. پیش از تلاش دوباره وضعیت را تازه کنید؛ چیزی خودکار تکرار نشده.
+Private connection · Runs on|اتصال خصوصی · اجرا روی
+Private connection|اتصال خصوصی
+`);
+  register(`
+Waiting for your answer|در انتظار پاسخ شما
+Sending your response…|در حال ارسال پاسخ شما…
+Only Send answers or Dismiss question replies to the engine. Closing leaves it pending.|فقط «ارسال پاسخ‌ها» یا «رد درخواست پرسش» به موتور پاسخ می‌دهد. با بستن، پرسش در انتظار می‌ماند.
+Release to dock in sidebar|برای قرار گرفتن در نوار کناری رها کنید
+Seneschal could not load. Voice still works. Check browser 3D support; after an update, restart Seneschal when tasks finish and reload.|Seneschal بارگذاری نشد؛ صدا همچنان کار می‌کند. پشتیبانی سه‌بعدی مرورگر را بررسی کنید؛ پس از به‌روزرسانی، با پایان کارها برنامه را دوباره اجرا و صفحه را تازه کنید.
+Seneschal is not loaded by this Seneschal host. Finish active tasks, restart Seneschal only, then reload this page.|این میزبان شخصیت Seneschal را بارگذاری نکرده. پس از پایان کارهای فعال، فقط Seneschal را دوباره اجرا و این صفحه را تازه کنید.
+NVIDIA voice has not loaded. Finish active tasks, restart Seneschal on the PC, then reload this page. Browser speech was not used instead.|صدای NVIDIA بارگذاری نشده. پس از پایان کارها، Seneschal را روی رایانه دوباره اجرا و این صفحه را تازه کنید. صدای مرورگر جایگزین نشده.
+This running Seneschal service does not support this action yet. Close and reopen Seneschal only; Windows does not need restarting.|سرویس فعلی هنوز این اقدام را پشتیبانی نمی‌کند. فقط Seneschal را ببندید و باز کنید؛ راه‌اندازی دوبارهٔ Windows لازم نیست.
+The service returned an unexpected response. Close and reopen Seneschal only, then retry.|سرویس پاسخ نامنتظره داد. فقط Seneschal را ببندید و باز کنید، سپس دوباره امتحان کنید.
+Request failed|درخواست ناموفق بود
+Seneschal and OpenCode updates|به‌روزرسانی Seneschal و OpenCode
+Seneschal application|برنامهٔ Seneschal
+Check latest Seneschal release|بررسی آخرین نسخهٔ Seneschal
+OpenCode engine|موتور OpenCode
+Checked separately from Seneschal. Updates stay on the installed major version; existing sessions and configuration are preserved.|جدا از Seneschal بررسی می‌شود. به‌روزرسانی در نسخهٔ اصلی نصب‌شده می‌ماند؛ گفت‌وگوها و تنظیمات فعلی حفظ می‌شوند.
+Check latest OpenCode release|بررسی آخرین نسخهٔ OpenCode
+Checking installed version and official releases…|بررسی نسخهٔ نصب‌شده و انتشارهای رسمی…
+Update available.|به‌روزرسانی موجود است.
+No newer compatible release found.|نسخهٔ سازگار جدیدتری پیدا نشد.
+A newer major version exists but is not selected automatically.|نسخهٔ اصلی جدیدتری وجود دارد، ولی خودکار انتخاب نمی‌شود.
+Update OpenCode engine|به‌روزرسانی موتور OpenCode
+Update Seneschal|به‌روزرسانی Seneschal
+Update unavailable|به‌روزرسانی در دسترس نیست
+No update available|به‌روزرسانی تازه‌ای نیست
+Downloading and installing…|در حال دریافت و نصب…
+The running Seneschal service needs restarting to load Activity.|برای بارگذاری فعالیت‌ها، سرویس Seneschal باید دوباره اجرا شود.
+Activity could not load this view.|فعالیت‌ها نتوانست این نما را بارگذاری کند.
+Startup preferences and service controls are managed on your PC. Your private connection does not expose the history service publicly.|تنظیم شروع خودکار و کنترل سرویس روی رایانه مدیریت می‌شود. اتصال خصوصی شما، سرویس تاریخچه را عمومی نمی‌کند.
+Off by default. Applies to future Seneschal host launches, not Windows startup. Uses the installed history runtime only; prepare it once here on the PC if needed. Saving does not start or stop the current service. The PC must stay awake and connected.|پیش‌فرض خاموش است. برای اجرای بعدی میزبان Seneschal است، نه شروع Windows. فقط از برنامهٔ تاریخچهٔ نصب‌شده استفاده می‌کند؛ در صورت نیاز همین‌جا روی رایانه یک‌بار آماده‌اش کنید. ذخیره کردن، سرویس فعلی را شروع یا متوقف نمی‌کند. رایانه باید بیدار و متصل بماند.
+Startup preference could not load. If Seneschal was just updated, restart its host once, then reopen Service.|تنظیم شروع خودکار بارگذاری نشد. اگر Seneschal تازه به‌روز شده، میزبان را یک‌بار دوباره اجرا و بخش سرویس را باز کنید.
+Saved. Activity will start with future Seneschal host launches. No Windows startup task was added.|ذخیره شد. فعالیت‌ها در اجرای بعدی میزبان Seneschal شروع می‌شود. کاری به شروع Windows اضافه نشد.
+Saved. Automatic Activity startup is off; a running history service was not stopped.|ذخیره شد. شروع خودکار فعالیت‌ها خاموش است؛ سرویس تاریخچهٔ در حال کار متوقف نشد.
+Startup preference could not be saved.|تنظیم شروع خودکار ذخیره نشد.
+Waiting for the history service on your PC. No service was started from this phone.|در انتظار سرویس تاریخچهٔ رایانه. سرویسی از این گوشی شروع نشده است.
+Showing the latest index available from the PC.|نمایش آخرین فهرست موجود از رایانه
+Manage the history service on your host PC.|سرویس تاریخچه را روی رایانهٔ میزبان مدیریت کنید.
+Start the local Activity service before reading history.|پیش از خواندن تاریخچه، سرویس محلی فعالیت‌ها را شروع کنید.
+Your work, in perspective|نمایی از کارهای شما
+Start the local history service to explore recorded sessions and usage.|برای بررسی گفت‌وگوها و مصرف ثبت‌شده، سرویس تاریخچهٔ محلی را شروع کنید.
+Start local history|شروع تاریخچهٔ محلی
+Start Activity to load local history.|برای بارگذاری تاریخچهٔ محلی، فعالیت‌ها را شروع کنید.
+Prepare local history|آماده‌سازی تاریخچهٔ محلی
+Stop history service|توقف سرویس تاریخچه
+Restart history service|راه‌اندازی دوبارهٔ سرویس تاریخچه
+Rebuild index|بازسازی فهرست
+From conversation to insight|از گفت‌وگو تا شناخت
+Local history pipeline|مسیر تاریخچهٔ محلی
+01 · SOURCE|۰۱ · منبع
+Recorded chats|گفت‌وگوهای ثبت‌شده
+OpenCode sessions and tool outputs|گفت‌وگوهای OpenCode و خروجی ابزارها
+Explore history ↗|بررسی تاریخچه ↗
+02 · LOCAL INDEX|۰۲ · فهرست محلی
+History service|سرویس تاریخچه
+Agent Trail reads and indexes records|Agent Trail سوابق را می‌خواند و فهرست می‌کند
+03 · INSIGHTS|۰۳ · شناخت
+Usage & estimates|مصرف و برآوردها
+Daily consumption, projects and models|مصرف روزانه، پروژه‌ها و مدل‌ها
+Explore usage ↗|بررسی مصرف ↗
+Original history is the source; the local index powers these views. Live progress below is captured separately in this window.|تاریخچهٔ اصلی منبع است و این نماها از فهرست محلی ساخته می‌شوند. پیشرفت زندهٔ پایین جداگانه در این پنجره ثبت می‌شود.
+How recent sessions connect|ارتباط گفت‌وگوهای اخیر
+No recorded relationships yet.|هنوز ارتباطی ثبت نشده.
+Only the five recently updated records are shown. Lines connect recorded parent and worker sessions; select a node to inspect it.|فقط پنج سابقهٔ تازه به‌روزشده نشان داده می‌شود. خط‌ها گفت‌وگوهای والد و عامل را وصل می‌کنند؛ برای بررسی، یکی را انتخاب کنید.
+Worker|عامل کاری
+Parent outside this view|والد خارج از این نما
+Parent chat|گفت‌وگوی والد
+Where tokens go|مصرف توکن‌ها در کجاست؟
+Recorded token categories|دسته‌های توکن ثبت‌شده
+Partial|بخشی از داده
+category tokens|توکن دسته‌ها
+Share unavailable|سهم نامشخص
+Shares of the four recorded categories.|سهم چهار دستهٔ ثبت‌شده
+Category reporting is incomplete; proportions are hidden.|گزارش دسته‌ها ناقص است؛ نسبت‌ها پنهان‌اند.
+No project|بدون پروژه
+Model not recorded|مدل ثبت نشده
+Historical match|نتیجهٔ تاریخچه
+Unknown|نامشخص
+Aborted|لغوشده
+Active|فعال
+Complete|تمام‌شده
+Run|اجرا
+Run again|اجرای دوباره
+Open session|باز کردن گفت‌وگو
+Open board|باز کردن تابلو
+Edit agent|ویرایش عامل
+Delete card|حذف کارت
+Stop this agent before editing|پیش از ویرایش، این عامل را متوقف کنید
+Selected plan|برنامهٔ انتخاب‌شده
+No task written yet.|هنوز وظیفه‌ای نوشته نشده.
+Imported model|مدل واردشده
+Current model|مدل فعلی
+Live activity|فعالیت زنده
+Per request|در هر درخواست
+Global|سراسری
+The same paired browser can return for 12 hours without another code, unless disconnected, revoked or its cookie is cleared. Restarting the gateway alone does not revoke it.|همین مرورگر متصل تا ۱۲ ساعت بدون کد تازه برمی‌گردد، مگر اینکه اتصال قطع، دسترسی باطل یا کوکی پاک شود. راه‌اندازی دوبارهٔ درگاه به‌تنهایی دسترسی را باطل نمی‌کند.
+`);
+  register(`
+Minimal|بسیار کم
+Extra high|بسیار زیاد
+Maximum|بیشترین
+Fast|سریع
+Standard|معمولی
+Seneschal · Build|Seneschal · اجرا
+Seneschal · Plan|Seneschal · برنامه‌ریزی
+Seneschal · Chat|Seneschal · گفت‌وگو
+Pin a session to keep it here.|برای نگه داشتن یک گفت‌وگو در اینجا، آن را سنجاق کنید.
+No unpinned sessions in this project.|گفت‌وگوی سنجاق‌نشده‌ای در این پروژه نیست.
+Chat mode has no active tools.|حالت گفت‌وگو ابزار فعالی ندارد.
+Policy will appear when a project is selected.|با انتخاب پروژه، سیاست اجازه‌ها نمایش داده می‌شود.
+No connected providers reported.|ارائه‌دهندهٔ متصلی گزارش نشده.
+Connected providers|ارائه‌دهندگان متصل
+Navigate, click, type, inspect, screenshot|باز کردن صفحه، کلیک، تایپ، بررسی و تصویر گرفتن
+Browser bridge is not available|اتصال مرورگر در دسترس نیست
+Blender bridge is live on this PC|اتصال Blender روی این رایانه فعال است
+Ready — open Blender when needed|آماده؛ در صورت نیاز Blender را باز کنید
+MCP bridge is not connected|اتصال MCP برقرار نیست
+Estimate unavailable|برآورد در دسترس نیست
+Repair required|نیاز به ترمیم اتصال
+Visible Brave|پنجرهٔ Brave نمایان است
+Connected · hidden|متصل · پنهان
+Hidden mode|حالت پنهان
+`);
+  /* Wallpaper worlds and Activity service: authored UI, not history content. */
+  register(`
+Orbit Drift|مدار آرام
+Essentials|نماهای ساده
+PIXEL WORLD|دنیای پیکسلی
+WORKSPACE ATMOSPHERES / 01—09|پس‌زمینه‌های فضای کار / \u2066۰۱—۰۹\u2069
+Still|ثابت
+Seneschal originals|صحنه‌های اصلی Seneschal
+RESTORED · LIVING ORIGINAL|نسخهٔ اصلیِ زنده، بازگردانی‌شده
+City|شهر
+Lunar|ماه
+Foundry|کارگاه مداری
+Starlight|نور ستاره
+Afterlight collection|مجموعهٔ Afterlight
+Sleeper|قطار شبانه
+Pelagic|اعماق دریا
+Sanctuary|پناهگاه
+Still composition|نمای ثابت
+Citylight|روشنای شهر
+City Nocturne|شب‌آهنگ شهر
+Lunar Relay|پایگاه ماه
+Orbital Foundry|کارگاه مداری
+Canal City|شهر آبراهه‌ها
+Northstar|ستارهٔ شمال
+The Last Sleeper|آخرین واگن شبانه
+Pelagic Archive|آرشیو اعماق
+Lantern Sanctuary|پناهگاه فانوس‌ها
+The original slow geometric composition.|نمای هندسی اصلی با حرکت آرام.
+A quiet workspace without background animation.|فضای کاری آرام، بدون حرکت پس‌زمینه.
+The original jade skyline and copper moon, with a living avenue, rooftop lanterns and rain-lit reflections.|خط افق یشمی و ماه مسی، با خیابانی زنده، فانوس‌های پشت‌بام و بازتاب باران.
+A working night street: passing traffic, a busy kitchen, rooftop company and reflections in the rain.|خیابانی زنده در شب؛ رفت‌وآمد خودروها، آشپزخانه‌ای شلوغ، همراهان پشت‌بام و بازتاب باران.
+A working lunar outpost: rovers, service drones and a survey team move beneath the light of Earth.|پایگاهی فعال روی ماه؛ ماه‌نوردها، پهپادهای خدماتی و گروه نقشه‌برداری زیر نور زمین حرکت می‌کنند.
+A living orbital shipyard, with docking traffic, repair operations and a working habitat ring.|کارگاهی زنده در مدار، با رفت‌وآمد سفینه‌ها، عملیات تعمیر و حلقهٔ سکونت فعال.
+A sleepless city, passing trains and a warm rooftop studio.|شهری بیدار، قطارهای در حال عبور و کارگاهی گرم روی پشت‌بام.
+A timber observatory above a glacial lake. The northern sky keeps watch.|رصدخانه‌ای چوبی بالای دریاچه‌ای یخچالی، زیر آسمان آرام شمال.
+The quietest seat on a night train. Snowy valleys slip past your window.|آرام‌ترین صندلی قطار شبانه؛ دره‌های برفی از کنار پنجره می‌گذرند.
+A glass research room at the ocean floor. A whale moves through the blue.|اتاق پژوهشی شیشه‌ای در کف اقیانوس؛ نهنگی در آبی دریا شنا می‌کند.
+A cedar pavilion, a reflecting pool and a thousand quiet mountain steps.|کوشکی چوبی، حوضی آینه‌گون و پله‌های آرام کوهستان.
+Send avenue traffic|حرکت خودروها در خیابان
+Release rooftop lanterns|رها کردن فانوس‌های پشت‌بام
+Greet the rooftop cat|سلام به گربهٔ پشت‌بام
+Sweep the tower signal|فرستادن سیگنال برج
+Switch city lights|تغییر چراغ‌های شهر
+Ripple the avenue puddles|موج انداختن در چاله‌های آب خیابان
+Send street traffic|حرکت خودروهای خیابان
+Wake the night kitchen|فعال کردن آشپزخانهٔ شبانه
+Greet the street cat|سلام به گربهٔ خیابان
+Send the rooftop signal|فرستادن سیگنال پشت‌بام
+Switch window lights|تغییر چراغ پنجره‌ها
+Ripple the street puddles|موج انداختن در آب خیابان
+Dispatch a lunar rover|فرستادن ماه‌نورد
+Launch the service drone|پرواز پهپاد خدماتی
+Call the lunar surveyor|فراخواندن نقشه‌بردار ماه
+Send a relay pulse|فرستادن پالس مخابراتی
+Switch base lights|تغییر چراغ‌های پایگاه
+Stir a lunar dust trail|بلند کردن غبار ماه
+Dispatch a cargo shuttle|فرستادن شاتل باربری
+Start a robotic repair|آغاز تعمیر با ربات
+Call the maintenance robot|فراخواندن ربات تعمیرکار
+Send a dock signal|فرستادن سیگنال اسکله
+Switch station lights|تغییر چراغ‌های ایستگاه
+Release a coolant vent|تخلیهٔ بخار خنک‌کننده
+Send a night train|عبور قطار شبانه
+Release a lantern|رها کردن فانوس
+Say hello to the cat|سلام به گربه
+Make a wish|آرزو کردن
+Switch studio lights|تغییر چراغ‌های کارگاه
+Ripple the canal|موج انداختن در آبراهه
+Sweep the telescope|چرخاندن تلسکوپ
+Send a firefly flight|پرواز کرم‌های شب‌تاب
+Wake the fox|بیدار کردن روباه
+Send a falling star|نمایش شهاب
+Switch cabin lights|تغییر چراغ‌های کلبه
+Ripple the lake|موج انداختن در دریاچه
+Pass a lit village|عبور از روستای روشن
+Pour another tea|ریختن یک چای دیگر
+Wake the sleeping cat|بیدار کردن گربه
+A shooting star outside|نمایش شهاب پشت پنجره
+Switch reading lamp|تغییر چراغ مطالعه
+Draw / open curtains|باز و بسته کردن پرده‌ها
+Launch the submersible|حرکت زیردریایی پژوهشی
+Release a jellyfish bloom|رها کردن دستهٔ عروس‌های دریایی
+Call the whale|فراخواندن نهنگ
+Pulse the sonar|فرستادن پالس سونار
+Send a bubble column|فرستادن ستون حباب
+Ring the mountain bell|نواختن ناقوس کوهستان
+Release floating lanterns|رها کردن فانوس‌های شناور
+Visit the koi pond|تماشای حوض ماهی‌ها
+Light the hillside path|روشن کردن مسیر کوهستان
+Switch pavilion lights|تغییر چراغ‌های کوشک
+Ripple the reflecting pool|موج انداختن در حوض
+City life & avenue traffic|جنب‌وجوش شهر و رفت‌وآمد خیابان
+Window warmth|گرمای نور پنجره‌ها
+Rooftop life & skyline details|زندگی پشت‌بام و جزئیات خط افق
+Street life & passing traffic|جنب‌وجوش خیابان و خودروهای در حال عبور
+Shop & window warmth|گرمای نور مغازه‌ها و پنجره‌ها
+Night kitchen & rooftop life|آشپزخانهٔ شبانه و زندگی پشت‌بام
+Rovers, drones & survey activity|فعالیت ماه‌نوردها، پهپادها و نقشه‌بردارها
+Habitat & relay lights|چراغ‌های سکونتگاه و مخابرات
+Surface operations & relay details|عملیات سطح ماه و جزئیات مخابرات
+Docking traffic & machinery|رفت‌وآمد سفینه‌ها و دستگاه‌ها
+Station & work lights|چراغ‌های ایستگاه و کارگاه
+Shipyard operations & ring details|فعالیت کارگاه سفینه‌سازی و جزئیات حلقه
+Studio life|جنب‌وجوش کارگاه
+City life|جنب‌وجوش شهر
+Northern lights|شفق قطبی
+Fireflies & stars|کرم‌های شب‌تاب و ستاره‌ها
+Cabin warmth|گرمای نور کلبه
+Moving landscape|منظرهٔ در حال حرکت
+Journey speed|سرعت سفر
+Reading-lamp warmth|گرمای چراغ مطالعه
+Passing whale|عبور نهنگ
+Marine life|زندگی دریایی
+Station glow|درخشش ایستگاه
+Falling blossoms|ریزش شکوفه‌ها
+Petals & fireflies|گلبرگ‌ها و کرم‌های شب‌تاب
+Lantern warmth|گرمای نور فانوس‌ها
+Water movement|حرکت آب
+Water particles|ذرات در آب
+Calm|آرام
+Current|جریان آب
+Drifting particles|ذرات شناور
+Suspended haze|مه معلق
+This scene could not load. Choose another scene or reload the workspace.|این صحنه بارگیری نشد. صحنهٔ دیگری انتخاب کنید یا صفحه را تازه کنید.
+Still frame · system Reduced motion is on. Actions show one frame without starting animation.|نمای ثابت؛ کاهش حرکت در سیستم روشن است. هر دکمه فقط یک تصویر نشان می‌دهد و حرکت را آغاز نمی‌کند.
+Still frame · motion is manually paused. Select Resume to animate again.|نمای ثابت؛ حرکت را متوقف کرده‌اید. برای ادامه، «ادامهٔ حرکت» را بزنید.
+Motion paused while this window is hidden.|هنگام پنهان بودن این پنجره، حرکت متوقف است.
+Still frame · quiet conversation mode. Enable Animate during conversations to keep the background moving.|نمای ثابت در حالت گفت‌وگوی آرام؛ برای حرکت پس‌زمینه، «حرکت هنگام گفت‌وگو» را روشن کنید.
+Gallery thumbnails are still images. Explore full scene to see the animation.|تصویرهای گالری ثابت‌اند. برای دیدن حرکت، نمای کامل صحنه را باز کنید.
+Still composition · no animation by design.|این نمای ثابت عمداً حرکت ندارد.
+Conversation animation is enabled. Manual pause, hidden windows and system Reduced motion still take priority.|حرکت پس‌زمینه هنگام گفت‌وگو روشن است. توقف دستی، پنهان بودن پنجره و کاهش حرکت سیستم همچنان اولویت دارند.
+Conversations use a still frame by default. Home and full-scene previews animate unless motion is paused or system Reduced motion is on.|هنگام گفت‌وگو، پس‌زمینه به‌طور پیش‌فرض ثابت است. صفحهٔ اصلی و پیش‌نمایش کامل حرکت دارند، مگر حرکت را متوقف کنید یا کاهش حرکت سیستم روشن باشد.
+Local history service|سرویس تاریخچهٔ محلی
+Manage the runtime and the derived history index.|سرویس و فهرست ساخته‌شده از تاریخچه را مدیریت کنید.
+Local history is ready.|تاریخچهٔ محلی آماده است.
+Local history is available.|تاریخچهٔ محلی در دسترس است.
+Runtime|برنامهٔ سرویس
+History source|منبع تاریخچه
+Local index|فهرست محلی
+Last refreshed|آخرین به‌روزرسانی
+Recorded source sessions|تعداد گفت‌وگوهای ثبت‌شده در منبع
+Configured OpenCode database|پایگاه دادهٔ تنظیم‌شدهٔ OpenCode
+Created on first start|در نخستین اجرا ساخته می‌شود
+Checking local service…|در حال بررسی سرویس محلی…
+Restart service|راه‌اندازی دوبارهٔ سرویس
+Stop service|توقف سرویس
+Rebuild history index|بازسازی فهرست تاریخچه
+Rebuilding preserves the previous index as a local backup and reads the original history again.|بازسازی، فهرست قبلی را به‌عنوان نسخهٔ پشتیبان محلی نگه می‌دارد و تاریخچهٔ اصلی را دوباره می‌خواند.
+Diagnostics and compatibility|بررسی مشکلات و سازگاری
+The tested runtime is Agent Trail 0.1.7. Logs are saved in|نسخهٔ بررسی‌شده، Agent Trail 0.1.7 است. گزارش‌ها در این فایل ذخیره می‌شوند:
+Session history is read from OpenCode. Other applications are excluded from this Seneschal index.|تاریخچهٔ گفت‌وگوها از OpenCode خوانده می‌شود. دادهٔ برنامه‌های دیگر وارد این فهرست نمی‌شود.
+Open original Agent Trail dashboard ↗|باز کردن داشبورد اصلی Agent Trail ↗
+Indexing local history. Available records can already be opened.|تاریخچهٔ محلی در حال فهرست‌شدن است. سوابق آماده را می‌توانید باز کنید.
+OpenCode history could not be read. Check the source database in Service.|خواندن تاریخچهٔ OpenCode ممکن نشد. پایگاه دادهٔ منبع را در بخش سرویس بررسی کنید.
+History refresh was incomplete. Refresh again or inspect Service.|تازه‌سازی تاریخچه کامل نشد. دوباره تازه کنید یا بخش سرویس را بررسی کنید.
+Preparing the local history service…|در حال آماده‌سازی سرویس تاریخچهٔ محلی…
+Activity is stopped.|سرویس فعالیت‌ها متوقف است.
+Available from your phone|دسترسی از تلفن همراه
+Start Activity with Seneschal|اجرای فعالیت‌ها همراه Seneschal
+Save startup preference|ذخیرهٔ تنظیم اجرای خودکار
+Saving startup preference…|در حال ذخیرهٔ تنظیم اجرای خودکار…
+Loading startup preference…|در حال بارگیری تنظیم اجرای خودکار…
+Startup preference could not be saved.|ذخیرهٔ تنظیم اجرای خودکار ممکن نشد.
+Off by default. Applies to future Seneschal host launches, not Windows startup. Uses the installed history runtime only; prepare it once here on the PC if needed. Saving does not start or stop the current service. The PC must stay awake and connected.|به‌طور پیش‌فرض خاموش است. این گزینه به اجرای بعدی Seneschal مربوط است، نه شروع ویندوز. فقط از سرویس تاریخچهٔ نصب‌شده استفاده می‌کند؛ در صورت نیاز، آن را یک‌بار روی رایانه آماده کنید. ذخیرهٔ این گزینه سرویس فعلی را روشن یا خاموش نمی‌کند. رایانه باید روشن و متصل بماند.
+Saved. Activity will start with future Seneschal host launches. No Windows startup task was added.|ذخیره شد. فعالیت‌ها در اجراهای بعدی Seneschal شروع می‌شود. کاری به شروع خودکار ویندوز اضافه نشد.
+Saved. Automatic Activity startup is off; a running history service was not stopped.|ذخیره شد. اجرای خودکار فعالیت‌ها خاموش است؛ سرویس فعلی متوقف نشد.
+PC history service|سرویس تاریخچهٔ رایانه
+History is available|تاریخچه در دسترس است
+Use Overview, Sessions or Usage to explore the PC history index.|برای بررسی تاریخچهٔ رایانه، از نمای کلی، گفت‌وگوها یا مصرف استفاده کنید.
+Startup preferences and service controls are managed on your PC. Your private connection does not expose the history service publicly.|تنظیم اجرای خودکار و کنترل سرویس روی رایانه مدیریت می‌شود. اتصال خصوصی شما سرویس تاریخچه را عمومی نمی‌کند.
+`);
+  /* END LANGUAGE COPY */
+  const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const languages = Object.freeze({ en: { label: 'English', dir: 'ltr', locale: 'en-US' }, fa: { label: 'فارسی', dir: 'rtl', locale: 'fa-IR-u-ca-gregory' } });
+  const storageKey = 'seneschal-interface-language-v1';
+  let language = 'en';
+  const number = (value, options) => new Intl.NumberFormat(languages[language].locale, options).format(value);
+  const date = (value, options) => new Intl.DateTimeFormat(languages[language].locale, options).format(new Date(value));
+  const patterns = [
+    [/^Last indexed (.+?)( · Coverage may be incomplete)?$/, (when, partial) => `آخرین فهرست‌سازی: ${when}${partial ? ' · ممکن است بخشی از سوابق هنوز آماده نباشد' : ''}`],
+    [/^([1-6])\. (.+)$/, (n, label) => t(label) === label ? `${n}. ${label}` : `${number(Number(n))}. ${t(label)}`],
+    [/^(.+) · (triggered|still-frame result; motion remains paused|click or use the matching number)$/, (label, state) => {
+      const translated = t(label);
+      return translated === label ? `${label} · ${state}` : translated + ' · ' + ({ triggered: 'اجرا شد', 'still-frame result; motion remains paused': 'نتیجه در نمای ثابت؛ حرکت همچنان متوقف است', 'click or use the matching number': 'کلیک کنید یا کلید عددی مربوط را بزنید' })[state];
+    }],
+    [/^(\d+(?:\.\d+)?)%$/, n => number(Number(n)) + '٪'],
+    [/^Live animation · up to (\d+) fps · rendered locally$/, n => `پویانمایی زنده؛ تا ${number(Number(n))} فریم در ثانیه؛ پردازش روی همین دستگاه`],
+    [/^Live animation · (\d+) fps limit · click a detail or press 1–6 · Esc to return$/, n => `پویانمایی زنده؛ حداکثر ${number(Number(n))} فریم در ثانیه؛ روی جزئیات بزنید یا از کلیدهای ۱ تا ۶ استفاده کنید؛ بازگشت با Esc`],
+    [/^(.+) · rotation (paused|in (\d+) min)$/, (base, status, minutes) => {
+      const translated = t(base);
+      return translated === base ? `${base} · rotation ${status}` : `${translated} · ${minutes ? `صحنهٔ بعدی تا ${number(Number(minutes))} دقیقهٔ دیگر` : 'تعویض خودکار متوقف است'}`;
+    }],
+    [/^(Talk|Mic|On) · (Ready|Listening|Speaking|Thinking|Mic muted|Recording|Processing|Connecting|Sending)( — click to stop)?$/, (type, stage, stop) => `${{Talk:'مکالمه',Mic:'میکروفون',On:'روشن'}[type]} · ${t(stage)}${stop ? ' — برای توقف کلیک کنید' : ''}`],
+    [/^(\d+) characters$/, n => `${number(Number(n))} نویسه`],
+    [/^(\d+) backups$/, n => `${number(Number(n))} نسخهٔ پشتیبان`],
+    [/^(\d+) archived$/, n => `${number(Number(n))} بایگانی‌شده`],
+    [/^(\d+) connected$/, n => `${number(Number(n))} متصل`],
+    [/^(\d+) LIVE$/, n => `${number(Number(n))} فعال`],
+    [/^(\d+) (agents|sessions|turns|tool calls|tokens|matches)$/, (n, unit) => `${number(Number(n))} ${{ agents: 'عامل', sessions: 'گفت‌وگو', turns: 'نوبت', 'tool calls': 'اجرای ابزار', tokens: 'توکن', matches: 'نتیجه' }[unit]}`],
+    [/^(\d+)m ago$/, n => `${number(Number(n))} دقیقه پیش`],
+    [/^(\d+)h ago$/, n => `${number(Number(n))} ساعت پیش`],
+    [/^(\d+)d ago$/, n => `${number(Number(n))} روز پیش`],
+    [/^Turn (\d+)$/, n => `نوبت ${number(Number(n))}`],
+    [/^Permission required · (\d+) waiting$/, n => `نیاز به اجازه · ${number(Number(n))} درخواست در انتظار`],
+    [/^\$(\d+) \/ month$/, n => `${number(Number(n))} دلار در ماه`],
+    [/^\$(\d+) TARGET$/, n => `هدف: ${number(Number(n))} دلار`],
+    [/^(Expand|Minimize) (projects|pinned sessions|sessions|pinned messages|section)$/, (action, section) => `${action === 'Expand' ? 'باز کردن' : 'جمع کردن'} ${{ projects: 'پروژه‌ها', 'pinned sessions': 'گفت‌وگوهای سنجاق‌شده', sessions: 'گفت‌وگوها', 'pinned messages': 'پیام‌های سنجاق‌شده', section: 'بخش' }[section]}`]
+  ];
+  function t(value) {
+    if (typeof value !== 'string' || language === 'en') return value;
+    const key = normalize(value), exact = translations[key] || folded[key.toLowerCase()];
+    let translated = exact;
+    if (!translated) for (const [pattern, format] of patterns) { const match = key.match(pattern); if (match) { translated = format(...match.slice(1)); break; } }
+    const unavailable = ' Unavailable right now; check the nearby status.';
+    if (!translated && key.endsWith(unavailable)) { const base = t(key.slice(0, -unavailable.length)); if (base !== key.slice(0, -unavailable.length)) translated = base + ' فعلاً در دسترس نیست؛ وضعیت کنار آن را بررسی کنید.'; }
+    if (!translated) return value; // Unknown diagnostics are displayed verbatim, never guessed.
+    return value.replace(/\S[\s\S]*\S|\S/, translated);
+  }
+  const texts = new WeakMap(), attributes = new WeakMap();
+  function setText(element, source) {
+    const output = t(source);
+    if (element.textContent !== output) element.textContent = output;
+    if (element.childNodes.length === 1 && element.firstChild.nodeType === 3) texts.set(element.firstChild, { source, output });
+  }
+  // Names, prompts, transcripts, tool payloads, custom question choices and editor
+  // contents are data, even when they happen to equal a translated UI word.
+  const protectedSelector = [
+    'script,style,svg,pre,code,kbd,textarea,input,bdi,[contenteditable],[data-no-i18n],.feature-help-tooltip',
+    '.project-item,.session-copy,.message-meta>strong,#sessionTitle,#deleteSessionTitle,#deleteMessageTitle,#deleteProjectTitle,#renameProjectPath,#moveSessionSource',
+    '.archive-manager-item>div,.board-history-item>div,.pinned-message-item>span,.model-picker-option,#modelPickerLabel:not([data-model-name="false"]),#modelSelect,#agentModelInput,.model-provider-group summary,.tool-chip,.provider-row>span,.connected-provider-chips>span',
+    '.attachment-name,.attachment-chip,.activity-markdown,.activity-message,.activity-replay-message,.activity-session-title,.activity-session-row>div:first-child,.activity-session-map strong,.activity-session-map small,.activity-ranking [title]',
+    '.activity-detail-heading h3,.activity-detail-heading p,.activity-filter-chip,.activity-live-feed,.chat-activity-list,.log-row,.skill-link-result strong,.skill-link-result span,[data-skill-key] strong,[data-skill-key] small',
+    '#effectiveStack,.instruction-preview,.stack-card header>span,.question-body legend,.question-option strong,.question-option small',
+    '.permission-pattern,.permission-copy h3,.tool-part pre,.tool-part header>strong,.tool-part header>span:not(.tool-status),.reasoning-part>div,.message-content',
+    '.board-agent-title,.board-agent-prompt,.board-agent-activity span,.board-agent-card>p,.board-dependency,.agent-dependency-list label>span,.remote-host-bar strong,#phoneAccessUrl,#phoneAccessDevices li>span'
+  ].join(',');
+  const contentControl = '.message-content :is(.code-copy-button,.tool-status),.message-content .reasoning-part>summary,.message-content .tool-disclosure';
+  function eligible(node, attribute) {
+    const element = node.nodeType === 1 ? node : node.parentElement;
+    if (!element || element.closest('[data-no-i18n],script,style,svg,pre,code,kbd,[contenteditable]')) return false;
+    if (attribute && ['title','aria-label','placeholder','aria-valuetext','alt'].includes(attribute)) {
+      // Values and links are never read or changed. Accessibility text belongs to controls.
+      return !element.matches('.project-item,.session-open-button,.model-picker-option,.message-map-step') && !element.closest('.question-body legend,.question-option strong,.question-option small,.activity-markdown,.activity-message,.activity-ranking [title]');
+    }
+    return !element.closest(protectedSelector) || element.matches(contentControl) || Boolean(element.closest('.code-copy-button'));
+  }
+  function translateText(node) {
+    if (!eligible(node)) return;
+    const previous = texts.get(node), current = node.data;
+    const source = previous && current === previous.output ? previous.source : current;
+    const output = t(source); texts.set(node, { source, output });
+    if (output !== current) {
+      // Text-only options otherwise change their submitted value when translated.
+      const option = node.parentElement;
+      if (option.tagName === 'OPTION' && !option.hasAttribute('value')) option.setAttribute('value', option.value);
+      node.data = output;
+    }
+  }
+  function translateAttribute(element, key) {
+    if (!element.hasAttribute(key) || !eligible(element, key)) return;
+    const current = element.getAttribute(key), records = attributes.get(element) || {};
+    const previous = records[key], source = previous && current === previous.output ? previous.source : current;
+    let output = t(source);
+    if (language === 'fa') {
+      if (element.matches('.inspector-section-toggle') && /^(Expand|Minimize) /.test(source)) output = source.replace(/^(Expand|Minimize)/, action => t(action));
+      if (element.matches('.project-rename-button,.project-delete-button,.session-pin-button,.session-archive-button,.session-rename-button,.session-delete-button') && /^(Rename|Delete|Unpin|Pin|Restore|Archive) /.test(source)) {
+        output = source.replace(/^(Rename|Delete|Unpin|Pin|Restore|Archive)/, action => t(action)).replace(/ in Seneschal$/, ' در Seneschal').replace(/ from Seneschal$/, ' از Seneschal');
+      }
+      if (element.matches('[data-remove]') && source.startsWith('Remove ')) output = 'برداشتن پیوست: ' + source.slice(7);
+    }
+    records[key] = { source, output }; attributes.set(element, records);
+    if (output !== current) element.setAttribute(key, output);
+  }
+  function sourceLabel(node) {
+    const aria = attributes.get(node)?.['aria-label'];
+    if (aria && node.getAttribute('aria-label') === aria.output) return aria.source;
+    if (node.getAttribute('aria-label')) return node.getAttribute('aria-label');
+    let source = '';
+    for (const child of node.childNodes || []) source += child.nodeType === 3 ? texts.get(child)?.source || child.data : child.nodeType === 1 ? sourceLabel(child) : '';
+    return source;
+  }
+  function scan(node) {
+    if (node.nodeType === 3) { translateText(node); return; }
+    if (node.nodeType !== 1 && node.nodeType !== 9) return;
+    if (node.nodeType === 1) {
+      if (node.matches('script,style,svg,pre,code,kbd,[contenteditable],[data-no-i18n],.feature-help-tooltip')) return;
+      for (const key of ['aria-label','placeholder','title','aria-valuetext','alt']) translateAttribute(node, key);
+      if (node.matches('textarea,input')) { if (node.tagName === 'TEXTAREA' || ['text','search'].includes(node.type)) node.dir = 'auto'; return; }
+      if (node.matches('.message-content,.activity-markdown,.question-body legend,.question-option strong,.question-option small')) {
+        node.setAttribute('dir', 'auto');
+      }
+      if (node.matches('.model-picker-option,.session-copy,.project-item span,.activity-session-title,#sessionTitle')) node.setAttribute('dir', 'auto');
+    }
+    for (const child of node.childNodes) scan(child);
+  }
+  let document, observer;
+  function change(next, persist = true) {
+    if (!Object.hasOwn(languages, next)) return false;
+    language = next;
+    if (!document) return true;
+    root.SeneschalFeatureHelp?.hide?.();
+    document.documentElement.lang = next; document.documentElement.dir = languages[next].dir;
+    const selector = document.getElementById('interfaceLanguage'); if (selector) selector.value = next;
+    scan(document.body);
+    if (persist) {
+      let saved = true;
+      try { root.localStorage.setItem(storageKey, next); } catch { saved = false; }
+      const status = document.getElementById('interfaceLanguageStatus');
+      if (status) status.textContent = t(saved ? 'Language saved for this browser. Voice and model settings are unchanged.' : 'Language changed for this page. This browser could not save your preference.');
+    }
+    root.dispatchEvent(new root.CustomEvent('seneschal:languagechange', { detail: { language: next } }));
+    return true;
+  }
+  function install(doc) {
+    document = doc;
+    try { const saved = root.localStorage.getItem(storageKey); if (Object.hasOwn(languages, saved)) language = saved; } catch {}
+    observer = new root.MutationObserver(records => {
+      const added = new Set();
+      for (const record of records) {
+        if (record.type === 'characterData') translateText(record.target);
+        else if (record.type === 'attributes') translateAttribute(record.target, record.attributeName);
+        else for (const node of record.addedNodes) added.add(node);
+      }
+      for (const node of added) if (node.isConnected) scan(node);
+    });
+    observer.observe(doc.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['aria-label','title','placeholder','aria-valuetext','alt'] });
+    doc.getElementById('interfaceLanguage')?.addEventListener('change', event => change(event.target.value));
+    root.addEventListener('storage', event => { if (event.key === storageKey && Object.hasOwn(languages, event.newValue)) change(event.newValue, false); });
+    root.addEventListener('pagehide', event => { if (!event.persisted) observer.disconnect(); });
+    change(language, false);
+  }
+  root.SeneschalI18n = { t, number, date, change, setText, sourceLabel, languages, translations, scan, get language() { return language; } };
+  if (root.document) install(root.document);
+})(typeof window !== 'undefined' ? window : globalThis);

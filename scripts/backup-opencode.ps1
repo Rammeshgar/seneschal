@@ -1,15 +1,14 @@
+param(
+  [ValidateSet('backup','status','verify','restore-isolated')][string]$Operation = 'backup',
+  [string]$BackupID
+)
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
-$data = Join-Path $root 'data'
-$settingsPath = Join-Path $data 'settings.json'
-$settings = if (Test-Path -LiteralPath $settingsPath) { Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json } else { [pscustomobject]@{} }
-$distribution = if ($settings.wslDistribution) { $settings.wslDistribution } else { 'Ubuntu' }
-$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$destination = Join-Path $data "backups\$stamp"
-New-Item -ItemType Directory -Force -Path $destination | Out-Null
-$archive = Join-Path $destination 'opencode-config.tar.gz'
-$wslArchive = (& wsl.exe -d $distribution -- wslpath -a -u $archive).Trim()
-$safeArchive = $wslArchive.Replace("'", "'\"'\"'")
-& wsl.exe -d $distribution -- sh -lc "test -d \"`$HOME/.config/opencode\" && tar -czf '$safeArchive' -C \"`$HOME/.config\" opencode || true"
-Copy-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath (Join-Path $data 'instructions') -Destination $destination
-Write-Host "Backup saved to $destination"
+$worker = Join-Path $PSScriptRoot 'backup-manager.cjs'
+$node = (Get-Command node.exe -ErrorAction Stop).Source
+$arguments = @($worker, $Operation)
+if ($Operation -in @('verify','restore-isolated')) {
+  if ($BackupID -notmatch '^backup-\d{8}T\d{9}Z-[a-f0-9]{16}$') { throw 'Provide the backup ID shown in Seneschal Settings.' }
+  $arguments += $BackupID
+} elseif ($BackupID) { throw 'This operation does not accept a backup ID.' }
+& $node @arguments
+if ($LASTEXITCODE -ne 0) { throw 'Backup operation failed. No live history or sign-in files were replaced.' }

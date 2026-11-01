@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — source update 2026-11-01
+
+- Add a private, owner-paired Phone Access gateway with PC-only management, filtered routes, device revocation and source-hash qualification.
+- Separate available tools from approval grants; migrate older conversation overrides only with consent and confirmed engine compatibility. Add visible question controls and uncertain-reply recovery.
+- Add native Activity history/usage/service views, optional host-start preference and read-only phone history access.
+- Add optional consent-gated NVIDIA transcription and speech, request-matched reply playback, explicit browser failure states and separate microphone/speaker mute controls.
+- Bundle the new Seneschal companion with six animations, camera controls, floating/docked layouts and full-screen voice view.
+- Add local original/Afterlight wallpaper scenes, scene actions and motion controls without external art hosting.
+- Add hover/hold feature explanations, English/Persian UI, RTL-safe paths and translated dynamic panel messages.
+- Refine mobile Options, completed-tool collapse, non-overlapping notices/composer layout, compact sidebars and bounded hover motion.
+- Publish current source/tests, plain-language usage and private-access guides. Exclude local runtime files and replace developer-specific paths with explicit inputs.
+- This is a source refresh, not a new packaged ZIP or standalone desktop-installer release.
+
 ## 0.2.1-beta.19 — 2026-10-12
 
 - Check and update Seneschal and OpenCode independently; explicitly label unavailable updates and keep engine upgrades on the installed major version.

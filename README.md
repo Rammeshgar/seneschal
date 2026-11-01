@@ -4,27 +4,30 @@
 
 ![Seneschal — one calm workspace for models, tools, and control](assets/social/seneschal-social-preview.png)
 
-Seneschal gives OpenCode a focused, personal interface on Windows and WSL: per-session model switching, Plan/Build/Chat roles, approval controls, instruction and skill editing, session navigation, pinned and archived messages, attachments, voice input, a multi-agent workflow board, visible browser automation, VS Code launching, optional Blender status, and a matte day/night visual system.
+Seneschal gives OpenCode a personal workspace on Windows and WSL: per-session models, Plan/Build/Chat roles, explicit approvals, projects and skills, a multi-agent board, browser/Blender/VS Code integrations, local Activity history, optional cloud speech, a 3D companion, animated wallpapers and English/Persian controls.
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
+
+**New here? Start with the [user guide](docs/USER-GUIDE.md).** It explains the controls, permission choices, voice, mascot, Activity, phone access and practical workflows in plain language. The November 1 source update is newer than the last packaged ZIP; this commit does not publish a new installer or release asset.
 
 ## What it is
 
 ### Reading, updates, and activity
 
-Latest prepared version: **0.2.1-beta.19**. The compact composer includes Voice/dictation and conversation options, More options for agent and reasoning effort, a persistent Latest button, and a collapse control that preserves drafts while reading.
-
-Update checks distinguish the Seneschal application from the OpenCode engine. Engine updates target a stable release on the installed major version; finish active tasks first and restart the engine afterward to activate its installed binary.
-
-Expand **Live agent activity** below the prompt for the current session's recent recorded events and an embedded Agent Trail dashboard. Embedding is allowed only from the local dashboard on port 3030; an external-window fallback is available. Neither view reveals private model reasoning: only provider-reported summaries and recorded activity are shown.
-
 Responses render Markdown tables, headings, lists, quotes, and code blocks. Wide tables scroll inside the message instead of overflowing the workspace.
 
 In **Settings → App updates**, check GitHub anytime and install a newer published ZIP release. Downloads must match GitHub's SHA-256 digest. The updater backs up managed app files under `data/update-*`, preserves `data`, `config`, and model/browser runtimes, then restarts. Stop active agents before updating. Source Git checkouts are deliberately excluded; update those with Git. Failures are recorded in `data/update.log`.
 
-In **Settings → Agent activity**, inspect events received by the active project connection, filter by session, expand tool details, pause the view, or export up to 1,000 captured events. This capture lasts for the current window; it cannot reveal hidden model reasoning or events OpenCode does not emit.
+Open **Activity** for native Overview, Sessions, Usage and Service views. The optional pinned [Agent Trail](https://github.com/camtrik/agent-trail) runtime reads and indexes local OpenCode history; preparing it requires WSL, Node 22+, npm and internet. Live progress captured in the current window is separate from persistent history. Neither reveals private reasoning the provider does not expose. See [Activity integration](docs/ACTIVITY-INTEGRATION.md) and [startup](docs/ACTIVITY-STARTUP.md). Keep the history service's ports private.
 
-The same panel can install/open [Agent Trail](https://github.com/camtrik/agent-trail), an optional third-party history/usage/replay dashboard. First launch installs the pinned `@camtrik/agent-trail@0.1.7` package under `~/.local/share/seneschal-agent-trail` in WSL. It needs Node 22+, npm, and internet for installation; OpenCode history is read locally from its SQLite database. The dashboard opens at `http://localhost:3030`, with startup details in `data/agent-trail.log`. Do not expose its dashboard or ingest service to untrusted networks.
+### Voice, companion and personal workspace
+
+- Browser speech and optional **NVIDIA cloud voice** are separate from the selected chat model. Cloud speech requires explicit consent and supported provider access; trial limits and provider processing still apply. Mic and speaker have separate mute controls.
+- The bundled **Seneschal 3D companion** follows listening, thinking and speaking. Move/resize it, dock it, rotate the camera, minimize it or open the full-screen companion view. Assets and Three.js modules are local.
+- **Wallpapers** includes nine animated scenes plus still/geometric options, full-scene interaction controls and reduced-motion support. No model or audio call is needed for the art.
+- English and **فارسی** include translated help and right-to-left panels, while drafts, chat content and technical paths retain their original values. Hover or hold a control for a short explanation.
+- Compact sidebar shortcuts, collapsible prompt options and completed tool results keep the workspace usable on small screens. Motion feedback preserves document flow and respects reduced-motion settings.
+- **Private Phone Access** pairs your own browsers through Tailscale. The PC still runs the engine; gateway preparation and sensitive controls remain PC-only. Read the [setup guide](docs/PRIVATE-ACCESS-SETUP.md) before enabling it.
 
 - A custom browser interface served only on `127.0.0.1`
 - A secure local proxy in front of OpenCode's server
@@ -38,7 +41,7 @@ It is not an AI model, a provider subscription, or a way around provider usage l
 
 ## Interface
 
-<img width="1871" height="1079" alt="image" src="https://github.com/user-attachments/assets/14d987be-f167-43ec-bdc1-3e44652302a9" />
+![Privacy-safe illustration of the Seneschal night workspace](docs/images/seneschal-workspace-night.png)
 
 The image above is a privacy-safe product illustration based on the real interface. It shows the three-part workspace, approval controls, activity reporting, and local bridge status without exposing a user's sessions or provider account.
 
@@ -62,7 +65,7 @@ Each card can be stopped, edited, retried, or opened as a retained board session
 
 - Windows 11
 - WSL with an installed Linux distribution (Ubuntu is the default)
-- Node.js 20 or newer on Windows
+- Node.js 20 or newer on Windows; Node 22.16+ is recommended and required for SQLite backup features
 - OpenCode installed and working inside that WSL distribution
 - At least one model provider connected through OpenCode
 
@@ -125,13 +128,15 @@ The Blender entry is optional; common installed versions are detected automatica
 ## Known limits
 
 - Windows/WSL only in this beta
-- Tested against OpenCode 1.18.x; upstream API changes can break parts of the interface
+- Upstream OpenCode API changes can break parts of the interface; the older-conversation permission migration is explicitly gated to the verified 1.19.0 contract
 - Provider model lists and capabilities are controlled by OpenCode and the provider
 - Full private model reasoning is not exposed; the UI can show provider-supplied summaries and live tool activity
 - Browser and Blender bridges must be installed separately; Seneschal can repair its older hidden-only Playwright launcher but cannot create a missing Playwright installation
 - Agent Board handoffs and correction requests use completed textual outputs; files remain shared through the selected project folder, and automatic rework is limited to prevent loops
 - The VS Code companion provides chat and agent-driven editing but does not replace inline autocomplete or GitHub Copilot's proprietary UI
 - The local cost figure is informational, not a guaranteed cap
+- Phone Access requires a qualified installation, a supported personal Tailscale setup and a running PC; it is not cloud hosting
+- Cloud speech access may be limited or unavailable, and browser speech support varies by browser/OS
 
 ## Development
 
@@ -141,6 +146,10 @@ npm start
 ```
 
 The server intentionally has no npm runtime dependencies.
+
+Use Node 22.16+ for the complete test suite, including SQLite fixtures. The November source refresh passed 288 source tests and 207 separate Phone Access checks in offline containers; see [validation scope](docs/VALIDATION.md).
+
+Phone Access has a separate offline verifier, `scripts/verify-private-access.ps1`, which requires Docker Desktop and an already-installed official Node image. Runtime state, keys, histories, backups and qualification proofs are local data and are never included in source releases. Optional browser and raster tests use separately installed tooling; see their usage headers.
 
 ## License
 

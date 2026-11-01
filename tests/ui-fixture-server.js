@@ -10,7 +10,6 @@ let sessionCounter = 0;
 const sessions = [];
 const statuses = {};
 const messages = {};
-const projectAssignments = {};
 const fixtureBoard = { version: 3, id: "fixture-board", title: "Launch the Seneschal beta", directory: "/home/demo/projects/seneschal", objective: "Prepare, verify, and publish a reliable Seneschal release.", concurrency: 3, active: false, paused: false, createdAt: Date.now() - 7200000, updatedAt: Date.now() - 1800000, agents: [], communications: [] };
 const files = new Map([
   ["/", ["app/index.html", "text/html; charset=utf-8"]],
@@ -74,12 +73,6 @@ const server = http.createServer((request, response) => {
     }, 350);
     json(response, { accepted: true }, 202);
   });
-  const sessionMatch = url.pathname.match(/^(?:\/api)?\/session\/([^/]+)$/);
-  if (sessionMatch && request.method === "PATCH") return readBody(request, (body) => {
-    const session = sessions.find((item) => item.id === decodeURIComponent(sessionMatch[1]));
-    if (!session) return json(response, { error: "Session not found" }, 404);
-    Object.assign(session, body); json(response, session);
-  });
   const messageMatch = url.pathname.match(/^(?:\/api)?\/session\/([^/]+)\/message$/);
   if (messageMatch) return json(response, messages[decodeURIComponent(messageMatch[1])] || []);
   const apiResponses = new Map([
@@ -99,14 +92,7 @@ const server = http.createServer((request, response) => {
   if (url.pathname === "/workspace/usage") return json(response, { budget: 10, cost: 0.25, percent: 3 });
   if (url.pathname === "/workspace/agent-board/history/restore" && request.method === "POST") return readBody(request, () => json(response, fixtureBoard));
   if (url.pathname === "/workspace/agent-board/history") return json(response, { boards: [{ id: fixtureBoard.id, title: fixtureBoard.title, objective: fixtureBoard.objective, directory: fixtureBoard.directory, agentCount: 4, createdAt: fixtureBoard.createdAt, updatedAt: fixtureBoard.updatedAt }] });
-  if (url.pathname === "/workspace/session-projects") {
-    if (request.method === "POST") return readBody(request, body => { projectAssignments[body.sessionID] = body.directory; json(response, projectAssignments); });
-    return json(response, projectAssignments);
-  }
-  if (url.pathname === "/workspace/agent-board") {
-    if (request.method === "POST") return readBody(request, body => { Object.assign(fixtureBoard, body); json(response, fixtureBoard); });
-    return json(response, fixtureBoard);
-  }
+  if (url.pathname === "/workspace/agent-board") return json(response, fixtureBoard);
   if (url.pathname === "/workspace/instructions") return json(response, emptyInstructionSnapshot);
   return json(response, { ok: true }, 200);
 });

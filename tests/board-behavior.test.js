@@ -90,6 +90,7 @@ test('project assignment endpoint writes and reloads durable data', () => {
   const end = /\nfunction /.exec(tail);
   let output;
   const c = vm.createContext({ fs, path, URL, dataDirectory, host: '127.0.0.1', publicPort: 4196,
+    nvidiaSpeech: { handle: () => false },
     readJsonBody: (request, callback) => callback(null, request.body),
     json: (response, status, value) => { output = { status, value }; return true; },
     endpointError: (response, error) => { throw error; }
@@ -101,7 +102,7 @@ test('project assignment endpoint writes and reloads durable data', () => {
     c.handleWorkspaceEndpoint({ url: '/workspace/session-projects', headers: {}, method: 'GET' }, {}, '/workspace/session-projects');
     assert.equal(output.value.ses_test, '/target');
     assert.equal(JSON.parse(fs.readFileSync(path.join(dataDirectory, 'session-projects.json'))).ses_test, '/target');
-    for (const directory of ['Mie_Twee', 'My Project', 'C:\\Projects\\Mie_Twee', '/home/sadeq/projects']) {
+    for (const directory of ['Mie_Twee', 'My Project', 'C:\\Projects\\Mie_Twee', '/home/test/projects']) {
       c.handleWorkspaceEndpoint({ url: '/workspace/session-projects', headers: {}, method: 'POST', body: { sessionID: 'ses_test', directory } }, {}, '/workspace/session-projects');
       c.handleWorkspaceEndpoint({ url: '/workspace/session-projects', headers: {}, method: 'GET' }, {}, '/workspace/session-projects');
       assert.equal(output.value.ses_test, directory);

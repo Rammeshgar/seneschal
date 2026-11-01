@@ -1,0 +1,72 @@
+.ares-toggle { display: inline-flex; align-items: center; gap: 8px; flex: none; min-width: 52px; min-height: 44px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--muted); background: var(--recessed); font: 650 12px/1 var(--sans); cursor: pointer; }
+.ares-toggle > svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.ares-toggle small { margin-left: auto; font: 650 10px/1 var(--sans); }
+.composer-footer .ares-toggle { min-height: 36px; border-radius: 7px; }
+.composer-footer .ares-toggle small { display: none; }
+@media (max-width: 680px) { .composer-footer .ares-toggle { min-width: 44px; min-height: 44px; padding: 0; justify-content: center; } .composer-footer .ares-toggle > span { display: none; } }
+.ares-toggle[aria-pressed="true"] { color: var(--forest); border-color: var(--forest-deep); }
+.ares-toggle:focus-visible, .ares-companion button:focus-visible, #aresEnabled:focus-visible { outline: 2px solid var(--forest); outline-offset: 3px; }
+.ares-setting { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink); font-size: 13px; }
+.ares-setting input { width: 20px; height: 20px; accent-color: var(--forest); }
+.ares-availability { margin: 8px 0; padding: 10px; color: var(--ochre); border: 1px solid var(--line-strong); border-radius: 8px; font: 500 12px/1.5 var(--sans); }
+.ares-companion { position: fixed; z-index: 24; display: flex; flex-direction: column; container-type: inline-size; max-width: calc(100vw - 24px); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--raised); color: var(--ink); box-shadow: var(--shadow-soft); }
+.ares-companion[hidden] { display: none; }
+.ares-sidebar-slot:empty { display: none; }
+/* Companion and compact pulse stay above a separately scrolling tools pane. */
+.inspector:has(#inspectorContent) { display: flex; flex-direction: column; overflow: clip; }
+.inspector:has(#inspectorContent) .inspector-head { flex: none; position: relative; top: auto; }
+.inspector-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.ares-sidebar-slot { flex: none; margin-bottom: 8px; }
+.ares-sidebar-slot:empty { margin-bottom: 0; }
+.inspector-pulse { flex: none; }
+.inspector.ares-drop-target { outline: 2px solid var(--forest); outline-offset: -3px; box-shadow: inset 0 0 28px color-mix(in srgb, var(--forest) 12%, transparent); }
+.ares-companion.ares-docked { position: relative; inset: auto !important; width: 100% !important; height: clamp(220px, 29dvh, 260px) !important; max-width: 100%; margin: 10px 0 0; z-index: auto; box-shadow: none; }
+.ares-companion .ares-retry { flex: none; margin: 0 8px 8px; padding: 8px; border: 1px solid var(--forest-deep); color: var(--forest); font: 650 12px/1.3 var(--sans); }
+.ares-companion .ares-retry[hidden] { display: none; }
+.ares-companion header { flex: none; display: flex; align-items: center; padding: 4px 6px 4px 12px; gap: 4px; }
+.ares-companion header strong { flex: 1; font: 700 12px/1 var(--sans); letter-spacing: .03em; }
+.ares-companion button { min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font: 700 18px/1 var(--sans); }
+.ares-companion button:hover { color: var(--forest); background: var(--recessed); }
+.ares-companion button[hidden] { display: none; }
+.ares-companion .ares-drag { flex: 1; min-width: 44px; cursor: grab; touch-action: none; user-select: none; text-align: left; padding: 0 6px; font: 700 12px/1 var(--sans); color: var(--ink); }
+.ares-drag:active { cursor: grabbing; }
+.ares-drag:disabled { cursor: default; opacity: 1; }
+.ares-controls { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 6px; gap: 4px; border-top: 1px solid var(--line); overflow-x: auto; }
+.ares-controls > button { flex: none; }
+.ares-audio-controls { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 0; }
+.ares-companion .ares-audio-controls .voice-mute-button { gap: 6px; min-width: 44px; padding: 0 8px; font: 650 11px/1.3 var(--sans); }
+.ares-companion .ares-audio-controls .voice-mute-button[aria-pressed="true"] { color: var(--danger); border-color: var(--danger); }
+.ares-companion:not(.ares-maximized) .ares-audio-controls [data-mute-label] { display: none; }
+.ares-companion .ares-layout-button, .ares-companion .ares-talk { padding: 0 10px; font: 650 12px/1.3 var(--sans); }
+.ares-companion:not(.ares-maximized) .ares-controls .ares-layout-button { min-width: 44px; padding-inline: 4px; }
+/* Tiny floating cards resize from Layout > Larger/Smaller, keeping one row. */
+@container (max-width: 250px) { .ares-controls .ares-resize { display: none; } }
+.ares-companion .ares-talk { color: var(--forest); border: 1px solid var(--forest-deep); }
+.ares-resize { touch-action: none; cursor: nwse-resize !important; }
+.ares-companion.ares-minimized { height: 54px !important; }
+.ares-minimized > :not(header) { display: none !important; }
+.ares-stage { box-sizing: border-box; inset: 0; margin: 0; width: 100dvw; height: 100dvh; max-width: none; max-height: none; padding: 8px; background: var(--canvas); border: 0; color: var(--ink); }
+.ares-stage::backdrop { background: var(--canvas); }
+.ares-companion.ares-maximized { position: relative; inset: auto !important; width: 100% !important; height: 100% !important; max-width: none; margin: 0; box-shadow: none; }
+.ares-maximized .ares-controls { justify-content: center; flex-wrap: wrap; gap: 12px; padding: 8px; }
+.ares-maximized header { border-bottom: 1px solid var(--line); }
+.ares-voice-feedback { flex: none; margin: 0; padding: 6px 16px; text-align: center; color: var(--muted); font: 500 12px/1.45 var(--sans); }
+.ares-layout-popup { box-sizing: border-box; width: 260px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 12px; color: var(--ink); background: var(--raised); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow-soft); font: 600 12px/1.4 var(--sans); }
+.ares-layout-popup p { margin: 0 0 8px; }
+.ares-layout-arrows, .ares-layout-sizes { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+.ares-layout-popup .ares-layout-sizes button, .ares-layout-popup .ares-reset { flex: 1; min-height: 44px; padding: 8px; border: 1px solid var(--line-strong); font: 600 12px/1.4 var(--sans); }
+.ares-layout-popup .ares-reset { width: 100%; color: var(--forest); }
+.ares-layout-popup #aresCameraHelp { margin-top: 12px; color: var(--muted); font-weight: 500; }
+.ares-canvas { flex: 1; min-height: 0; width: 100%; position: relative; cursor: grab; touch-action: none; background: radial-gradient(ellipse at 50% 60%, color-mix(in srgb, var(--forest) 11%, var(--raised)), var(--raised) 75%); }
+.ares-canvas:active { cursor: grabbing; }
+.ares-canvas:focus-visible { outline: 2px solid var(--forest); outline-offset: -3px; }
+.ares-canvas canvas { width: 100%; height: 100%; display: block; }
+.ares-status { flex: none; margin: 0; min-height: 24px; padding: 3px 10px 7px; color: var(--muted); text-align: center; font: 600 11px/1.35 var(--sans); overflow-wrap: anywhere; }
+@media (max-width: 600px) { .ares-toggle { min-width: 48px; } .ares-companion { border-radius: 11px; } }
+/* At keyboard-height viewports, allow the whole Context panel to scroll rather
+   than reserving all available space for the companion and expanded pulse. */
+@media (max-height: 600px) {
+  .inspector:has(#inspectorContent) { overflow-y: auto; overscroll-behavior: contain; }
+  .inspector-content { flex: none; overflow: visible; padding-bottom: 8px; }
+  .ares-companion.ares-docked { height: 200px !important; }
+}

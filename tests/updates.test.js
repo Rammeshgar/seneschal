@@ -11,18 +11,6 @@ function fixture(fetcher) {
 }
 const asset = { name: 'seneschal-v0.2.1-beta.18.zip', digest: `sha256:${'a'.repeat(64)}`, size: 10, browser_download_url: 'https://github.com/Rammeshgar/seneschal/releases/download/v0.2.1-beta.18/release.zip' };
 const release = { tag_name: 'v0.2.1-beta.18', assets: [asset] };
-test('Engine check selects latest stable release on installed major only', async () => {
-  const { root } = fixture(async () => {});
-  const manager = createMaintenance({ root, distribution: 'Ubuntu', wslRunner: async () => '1.18.21', fetcher: async () => ({ ok: true, json: async () => [{ tag_name: 'v2.0.24' }, { tag_name: 'v1.19.0' }, { tag_name: 'v1.19.1', prerelease: true }] }) });
-  const result = await manager.engineCheck();
-  assert.equal(result.version, 'v1.19.0'); assert.equal(result.latest, 'v2.0.24'); assert.equal(result.available, true);
-});
-test('Engine update pins validated official target and verifies installed version', async () => {
-  const { root } = fixture(async () => {}); let updated = false; const commands = [];
-  const manager = createMaintenance({ root, distribution: 'Ubuntu', wslRunner: async script => { commands.push(script); if (script.includes('upgrade')) { updated = true; return ''; } return updated ? '1.19.0' : '1.18.21'; }, fetcher: async () => ({ ok: true, json: async () => [{ tag_name: 'v1.19.0' }] }) });
-  const result = await manager.engineUpdate();
-  assert.ok(commands.includes('set -e\nopencode upgrade v1.19.0')); assert.equal(result.current, 'v1.19.0');
-});
 test('Published release check ignores drafts and chooses numeric newest release', async () => {
   const { manager } = fixture(async () => ({ ok: true, json: async () => [{ ...release, tag_name: 'v0.2.1-beta.99', draft: true }, release, { ...release, tag_name: 'v0.2.1-beta.9' }] }));
   const result = await manager.check(); assert.equal(result.version, release.tag_name); assert.ok(result.installable);
@@ -36,6 +24,13 @@ test('Source checkout is never overwritten', async () => {
 test('Release without checksum cannot be installed', async () => {
   const { manager } = fixture(async () => ({ ok: true, json: async () => [{ ...release, assets: [{ ...asset, digest: null }] }] }));
   assert.equal((await manager.check()).installable, false);
+});
+test('Current releases never expose an install action', async () => {
+  const { manager } = fixture(async () => ({ ok: true, json: async () => [{ ...release, tag_name: 'v0.2.1-beta.17' }] }));
+  const result = await manager.check();
+  assert.equal(result.available, false);
+  assert.equal(result.installable, false);
+  await assert.rejects(manager.update(), /No newer installable release/);
 });
 test('Checksum failure never changes files or launches updater', async () => {
   const { manager, root } = fixture(async url => String(url).includes('api.github.com') ? { ok: true, json: async () => [release] } : { ok: true, body: (async function* () { yield Buffer.from('wrong'); })() });

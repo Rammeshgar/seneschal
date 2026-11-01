@@ -1,0 +1,11 @@
+# Automatic connection recovery
+
+Seneschal reconnects its live stream and reads a fresh snapshot when the browser comes online, returns to the foreground, restores a cached page, or the stream reconnects. A watchdog also replaces a stream that has been silent for 45 seconds while the page is visible.
+
+Catch-up reads only engine health, session metadata, task status, pending approvals and the selected conversation's messages. It requests a read-only question refresh after applying the snapshot. It does not submit prompts, approve requests, cancel tasks, restart board workers, invoke tools, or replay commands. It preserves the draft, attachments, selected conversation, scroll-follow choice, and uncertain approval/question replies. Stream handlers from older connections cannot change the current view. Snapshots that lose a race with a session switch, a live event, or a newer read are discarded.
+
+Recovery requests are single-flight, abortable and bounded to 12 seconds. Failures back off up to 30 seconds. A busy stream can trigger a later snapshot read without reconnecting it repeatedly. Hidden/offline pages do not launch recovery reads. Foregrounding or an online event requests recovery again. Browser throttling can delay recovery until the phone wakes; this is not an always-on background mobile service.
+
+A persistent status line near the prompt explains offline/reconnecting/catching-up states. It disappears after successful catch-up with an open stream and does not move keyboard focus. Authentication failures stop retries; the phone offers a normal pairing-page link rather than trying to pair itself. Expired or revoked sessions still require explicit pairing. PC tasks can continue while the phone is disconnected, provided the host stays awake and connected.
+
+Install the updated app files and reload the browser page once using the browser's Reload control (not Refresh workspace). No host/engine restart or new Tailscale mapping is needed for this client-only correction. Test on a real phone by starting a text-only response, disconnecting internet briefly, reconnecting and checking that the latest response arrives without refreshing or sending again. Repeat after backgrounding the phone browser. Isolated and fresh-browser fixture checks are not a substitute for that device test.

@@ -3,6 +3,9 @@ node_modules/
 artifacts/
 browser-runtime/
 dist/
+local-runtime/
+/.test-temp/
+*.local.json
 obsolete-seneschal-material/
 *-clean.zip
 *.log
@@ -13,4 +16,3 @@ obsolete-seneschal-material/
 !.env.example
 .DS_Store
 Thumbs.db
-/.test-temp/

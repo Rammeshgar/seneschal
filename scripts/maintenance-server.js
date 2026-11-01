@@ -5,9 +5,9 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 function version(value) { return String(value).replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/)?.slice(1).map((n, i) => n === undefined ? (i === 3 ? Infinity : 0) : Number(n)); }
 function newer(a, b) { a = version(a); b = version(b); if (!a || !b) return false; for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] > b[i]; } return false; }
-function createMaintenance({ root, distribution, linuxHome, shutdown, fetcher = fetch, wslRunner }) {
+function createMaintenance({ root, distribution, linuxHome, shutdown, fetcher = fetch, wslRunner, activity }) {
   const current = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
-  let selected = null, updating = false, trail = null;
+  let selected = null, updating = false;
   let engineUpdating = false;
   function runWsl(script) {
     if (wslRunner) return wslRunner(script);
@@ -51,9 +51,10 @@ function createMaintenance({ root, distribution, linuxHome, shutdown, fetcher = 
     const response = await fetcher('https://api.github.com/repos/Rammeshgar/seneschal/releases?per_page=30', { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Seneschal-updater' }, signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error(`GitHub update check failed (${response.status}). Try again later.`);
     const releases = await response.json();
-    selected = releases.filter(r => !r.draft && newer(r.tag_name, current)).sort((a, b) => newer(a.tag_name, b.tag_name) ? -1 : 1)[0] || null;
+    const latest = releases.filter(r => !r.draft && version(r.tag_name)).sort((a, b) => newer(a.tag_name, b.tag_name) ? -1 : 1)[0] || null;
+    selected = latest && newer(latest.tag_name, current) ? latest : null;
     const asset = selected?.assets?.find(a => /^seneschal.*\.zip$/i.test(a.name) && /^sha256:[a-f0-9]{64}$/i.test(a.digest || ''));
-    return { current, available: !!selected, version: selected?.tag_name || current, notes: selected?.body || '', installable: !!asset && !fs.existsSync(path.join(root, '.git')), message: selected && !asset ? 'This release needs a ZIP asset with a GitHub SHA-256 digest before automatic installation is available.' : fs.existsSync(path.join(root, '.git')) ? 'Source checkout: use Git to update; automatic installation is reserved for installed copies.' : '' };
+    return { current, available: !!selected, version: latest?.tag_name || current, notes: selected?.body || '', installable: !!asset && !fs.existsSync(path.join(root, '.git')), message: selected && !asset ? 'This release needs a ZIP asset with a GitHub SHA-256 digest before automatic installation is available.' : latest && newer(current, latest.tag_name) ? 'Your local build is newer than the published release. No downgrade was selected.' : fs.existsSync(path.join(root, '.git')) ? 'Source checkout: use Git to update; automatic installation is reserved for installed copies.' : '' };
   }
   async function update() {
     if (updating) throw new Error('An update is already in progress.');
@@ -80,31 +81,9 @@ function createMaintenance({ root, distribution, linuxHome, shutdown, fetcher = 
     } catch (error) { updating = false; throw error; }
   }
   async function startTrail() {
-    if (trail && trail.exitCode === null && !trail.killed) return { url: 'http://localhost:3030', message: 'Agent Trail is already running. It may still be indexing.' };
-    // Fixed script; no shell text or project paths are accepted from the browser.
-    const preload = fs.readFileSync(path.join(root, 'scripts', 'agent-trail-loopback.cjs')).toString('base64');
-const command = 'set -e; test "$(node --version | cut -d. -f1 | tr -d v)" -ge 22 || { echo "Agent Trail needs Node 22+ in WSL" >&2; exit 1; }; mkdir -p "$HOME/.local/share/seneschal-agent-trail"; cd "$HOME/.local/share/seneschal-agent-trail"; if ! test -f node_modules/.bin/agent-trail; then npm install --no-audit --no-fund @camtrik/agent-trail@0.1.7; fi; ' + `node -e "require('fs').writeFileSync('loopback.cjs', Buffer.from('${preload}', 'base64'))"; ` + 'export NODE_OPTIONS="--require $(pwd)/loopback.cjs" HOSTNAME=127.0.0.1 PORT=3030 INGEST_PORT=8078 NEXT_TELEMETRY_DISABLED=1; export OPENCODE_DB_PATH="$HOME/.local/share/opencode/opencode.db"; exec ./node_modules/.bin/agent-trail';
-    const logPath = path.join(root, 'data', 'agent-trail.log');
-    const logOffset = fs.existsSync(logPath) ? fs.statSync(logPath).size : 0;
-    const output = fs.openSync(logPath, 'a');
-    // Stream the script verbatim: Windows/WSL argument quoting must not rewrite it.
-    try { trail = spawn('wsl.exe', ['-d', distribution, '--', 'bash', '-ls'], { stdio: ['pipe', output, output], windowsHide: true }); }
-    finally { fs.closeSync(output); }
-    const child = trail;
-    child.stdin.on('error', () => {});
-    child.stdin.end(command + '\n');
-    try { await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); }); }
-    catch (error) { trail = null; throw error; }
-    for (let attempt = 0; attempt < 60; attempt++) {
-      if (child.exitCode !== null) {
-        const recent = fs.readFileSync(logPath).subarray(logOffset).toString('utf8').replace(/\u0000/g, '');
-        const detail = recent.split(/\r?\n/).find(line => line.trim() && !line.includes('base64'))?.slice(0, 240);
-        throw new Error(`Agent Trail could not start: ${detail || 'No startup details were returned.'} Full log: ${logPath}`);
-      }
-      try { const r = await fetch('http://127.0.0.1:3030', { signal: AbortSignal.timeout(500) }); if (r.ok) return { url: 'http://localhost:3030', message: 'Dashboard ready. Select OpenCode to inspect Seneschal sessions.' }; } catch {}
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    return { url: 'http://localhost:3030', message: `Installation/indexing continues. Retry shortly; progress is in ${logPath}.` };
+    if (!activity) throw new Error('Activity runtime is not configured.');
+    const status = await activity.start();
+    return { ...status, url: 'http://localhost:3030/all/dashboard' };
   }
   return { check, update, startTrail, engineCheck, engineUpdate };
 }

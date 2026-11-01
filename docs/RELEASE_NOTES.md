@@ -1,38 +1,14 @@
-# Seneschal v0.2.1 beta 17
+# Source update — November 1, 2026
 
-Beta 17 focuses on approvals, project organization, and transparent account usage.
+This repository refresh collects the work since the October 12 public update: private Phone Access, approval and question recovery, native Activity history, optional NVIDIA speech, the new Seneschal companion, local wallpaper worlds, English/Persian controls, contextual help and responsive layout improvements.
 
-Approval requests now stay visible while their session is working and through delayed engine snapshots, rather than appearing briefly and disappearing. Permission polling and replies use the requesting session's actual working directory, so reorganizing a conversation under another project does not make its approval controls stop working.
+Start with the [user guide](USER-GUIDE.md), [private phone setup](PRIVATE-ACCESS-SETUP.md), [permission migration](PERMISSION-OVERRIDES.md) and [Activity startup](ACTIVITY-STARTUP.md). The [changelog](../CHANGELOG.md) retains the earlier release history.
 
-Projects can now have a custom display name inside Seneschal. Renaming changes only the label: the real folder, files, sessions, and tool working paths remain untouched. Project aliases persist locally and appear consistently in navigation, headers, and the Move session dialog.
+This update publishes source, assets, tests and documentation. It does not publish a new ZIP, signed installer or standalone desktop app. The app's packaged updater follows actual GitHub releases; source checkouts update through Git. The existing beta version in `package.json` is not a claim that a new downloadable release has been published.
 
-The sidebar and Workspace settings now include a direct shortcut to OpenAI's official Work and Codex usage dashboard, where ChatGPT Plus users can check their current five-hour and weekly allowance and reset times. Seneschal does not invent a token estimate or claim access to an unavailable input/output split.
+Local credentials, histories, backups, browser profiles, development notes and model runtimes are excluded. Optional integrations still need their own setup and supported provider access. Finish active tasks before restarting an older host to load backend changes, then reload the browser pages.
 
-Session-status handling now accepts the engine's supported payload shapes, and the release includes regression coverage for sticky approvals, safe project labels, and the official usage controls. The complete test suite passes.
-
----
-
-## Previous beta 16 highlights
-
-Beta 16 focused on reliability at the boundaries between sessions, projects, models, and multi-agent work.
-
-Session renaming now opens consistently. **Move session** is an organizational operation: it places the conversation under another Seneschal project while preserving history, pins, archives, and the selected model. The engine's original tool working folder remains unchanged and is shown clearly. Assignments are stored in Seneschal's local data rather than fragile engine metadata, and existing named projects, WSL paths, and Windows paths are accepted.
-
-Sending one selected plan response to Agent Board now saves that exact text and immediately creates a practical default implementation, checking, and supervisor team. The chosen plan can be expanded and reviewed inside the board. If Board Architect customization fails, the saved default board remains usable instead of disappearing.
-
-Board scheduling now distinguishes a finished response from old or partial output, respects the configured parallel-worker limit when scheduling calls overlap, and stops workers even during session creation. Independent workers can still run concurrently, and the Supervisor receives every required handoff before final acceptance.
-
-The interface uses larger conversation text, stronger secondary contrast, more distinct colors across navigation and board states, and responsive composer controls that wrap when browser zoom reduces the available width. On narrow windows the inspector becomes a drawer rather than squeezing the conversation.
-
-The model catalog includes GPT-6 Astra when the connected OpenAI provider exposes it. A locally downloaded quantized Ternary Bonsai 27B model can run through Seneschal's PrismML-compatible local runtime; local model availability still depends on the configured weights and runtime starting successfully.
-
-Windows launcher reporting is more accurate: PowerShell 5.1 no longer treats ordinary native stderr warnings as automatic launch failure, and a server that starts and later exits is reported as having stopped unexpectedly. An already-running older Seneschal server must be restarted before updated backend behavior takes effect.
-
-The release includes behavior tests for durable project assignments, exact selected-plan handoffs, current-run completion detection, and parallel scheduling, alongside the existing security, installer, browser, VS Code, and UI checks.
-
----
-
-## Previous beta 15 highlights
+## Historical beta 15 notes
 
 Agent Board work is now clearly separated from ordinary conversations. Board Architect and worker sessions no longer clutter the Sessions, pinned Sessions, archive manager, project counts, or command search. They remain retained inside their board cards, where their work can still be reopened and inspected.
 

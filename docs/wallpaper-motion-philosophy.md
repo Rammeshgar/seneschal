@@ -1,0 +1,11 @@
+# Inhabited machinery
+
+The original four Seneschal scenes must remain recognizable places. Citylight keeps its copper disc, olive skyline and broad reflective avenue. Nocturne keeps its street canyon and warm shops. Lunar Relay retains the dish, terrain and engineered outpost. Foundry retains the ring, enormous planetary limb and foreground dock. Movement must reveal life within these compositions rather than replace their architecture.
+
+Motion is organized into near, middle and far layers. A visitor should notice real activity within three seconds, then discover longer cycles: an approaching vessel, a service carriage along the rim, a repair arm, a vehicle reflection, a surveying crew or kitchen steam. Individual objects have understandable trajectories, acceleration and return paths. Small repeated tasks create a functioning world rather than unrelated decorative particles.
+
+Light belongs to materials and machinery. Copper, jade, pale metal and cool blue retain their existing relationships. Work lamps can warm a landing bay and traffic can sweep reflected light across wet asphalt, but the full image never strobes. The planet may carry slow cloud movement without sliding or distorting the station. Shapes stay crisp on the existing two-pixel grid.
+
+Interaction should interrupt or amplify the ongoing story. Each original scene offers six named actions and six corresponding object regions. A maintenance robot is not a relabelled cargo effect; a surveyor is not a signal ring. Pointer affordances and keyboard-accessible buttons explain what can be touched without requiring accidental discovery. Paused actions render an understandable still and do not secretly restart motion.
+
+Performance and clarity are part of the craft. Architecture stays cached, moving actors are bounded, and the workspace retains the only animation clock. Zero activity means a genuinely stable frame. Quiet conversations, system reduced motion, explicit pause and hidden windows continue to stop animation. The interface explains these states clearly so deliberate stillness is not mistaken for a failed wallpaper. Real before/after raster samples and browser checks validate visible movement, interaction and lifecycle behavior.

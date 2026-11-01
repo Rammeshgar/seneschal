@@ -8,6 +8,7 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
+const { launchRuntime: moliLaunchRuntime, launchConfig: moliLaunchConfig } = require("./scripts/moli-mcp.cjs");
 
 const host = "127.0.0.1";
 const publicPort = Number(process.env.SENESCHAL_PORT) || 4196;
@@ -26,7 +27,7 @@ const wslDistribution = process.env.SENESCHAL_WSL_DISTRO || process.env.DIGITAL_
 const inferredLinuxUser = String(process.env.USERNAME || "user").toLowerCase();
 const wslLinuxHome = process.env.SENESCHAL_WSL_HOME || process.env.DIGITAL_SERVANT_WSL_HOME || localSettings.wslLinuxHome || `/home/${inferredLinuxUser}`;
 const launchDirectory = process.env.SENESCHAL_PROJECTS || process.env.DIGITAL_SERVANT_PROJECTS || localSettings.launchDirectory || `${wslLinuxHome}/projects`;
-const backupScript = path.join(installDirectory, "scripts", "backup-opencode.ps1");
+const backups = require('./scripts/backup-manager.cjs').createBackupManager({ root: installDirectory, distribution: wslDistribution, linuxHome: wslLinuxHome });
 const blenderRoot = "C:\\Program Files\\Blender Foundation";
 const detectedBlender = fs.existsSync(blenderRoot)
   ? fs.readdirSync(blenderRoot).filter((name) => /^Blender \d/.test(name)).sort().reverse().map((name) => path.join(blenderRoot, name, "blender.exe")).find(fs.existsSync)
@@ -98,8 +99,28 @@ const staticFiles = new Map([
   ["/index.html", ["index.html", "text/html; charset=utf-8"]],
   ["/workspace/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ["/workspace/app.js", ["app.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/nvidia-speech.js", ["nvidia-speech.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/ares.js", ["ares.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/ares-scene.js", ["ares-scene.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/ares.css", ["ares.css", "text/css; charset=utf-8"]],
+  ["/workspace/assets/ares/ares.glb", ["assets/ares/ares.glb", "model/gltf-binary"]],
+  ["/workspace/assets/ares/three.module.js", ["assets/ares/three.module.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/assets/ares/GLTFLoader.js", ["assets/ares/GLTFLoader.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/assets/ares/BufferGeometryUtils.js", ["assets/ares/BufferGeometryUtils.js", "application/javascript; charset=utf-8"]],
   ["/workspace/markdown.js", ["markdown.js", "application/javascript; charset=utf-8"]],
   ["/workspace/maintenance.js", ["maintenance.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/activity.js", ["activity.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/activity.css", ["activity.css", "text/css; charset=utf-8"]],
+  ["/workspace/phone-access.js", ["phone-access.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/phone-access.css", ["phone-access.css", "text/css; charset=utf-8"]],
+  ["/workspace/questions.js", ["questions.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/questions.css", ["questions.css", "text/css; charset=utf-8"]],
+  ["/workspace/wallpapers.js", ["wallpapers.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/wallpapers.css", ["wallpapers.css", "text/css; charset=utf-8"]],
+  ["/workspace/wallpapers/legacy-worlds.js", ["wallpapers/legacy-worlds.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/wallpapers/citylight-world.js", ["wallpapers/citylight-world.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/wallpapers/afterlight-worlds.js", ["wallpapers/afterlight-worlds.js", "application/javascript; charset=utf-8"]],
+  ["/workspace/wallpapers/afterlight-engine.js", ["wallpapers/afterlight-engine.js", "application/javascript; charset=utf-8"]],
   ["/workspace/favicon.svg", ["favicon.svg", "image/svg+xml"]],
   ["/workspace/favicon.ico", ["favicon.ico", "image/x-icon"]],
   ["/workspace/favicon.png", ["favicon.png", "image/png"]],
@@ -218,8 +239,31 @@ function checkUpstream(callback) {
   request.on("timeout", () => { request.destroy(); finish(false); });
 }
 
+function moliExistingSettings() {
+  // Read only the existing optional-tool name/policy; never print provider/auth data.
+  const config = JSON.parse(fs.readFileSync(openCodeConfigFile, "utf8").replace(/^(?:\uFEFF|ï»¿)+/, ""));
+  return { mcpNames: Object.keys(config.mcp || {}), permission: config.permission?.["seneschal_moli_*"],
+    agentPermissions: Object.fromEntries(["plan", "build"].map(name => [name, config.agent?.[name]?.permission?.["seneschal_moli_*"]])) };
+}
+
 function startUpstream() {
   const inherited = process.env.WSLENV ? `${process.env.WSLENV}:` : "";
+  // WSL's config is not always readable through the Windows UNC mount. Supply
+  // model definitions to the engine itself, without changing OAuth or endpoints.
+  let modelConfig;
+  try {
+    modelConfig = openCodeModelLaunchConfig(process.env.OPENCODE_CONFIG_CONTENT);
+  }
+  catch {
+    console.error("Existing inline OpenCode configuration is invalid; it was not replaced.");
+    return shutdown(1);
+  }
+  try {
+    const runtime = moliLaunchRuntime();
+    if (runtime) modelConfig = moliLaunchConfig(modelConfig, runtime, moliExistingSettings());
+  } catch {
+    console.warn("Optional Moli research was not loaded. Existing Brave browsing and model settings are unchanged.");
+  }
   upstream = spawn(
     "wsl.exe",
     ["-d", wslDistribution, "--", "bash", "-ic", `mkdir -p '${launchDirectory}' && cd '${launchDirectory}' && exec opencode serve --hostname ${host} --port ${upstreamPort}`],
@@ -230,7 +274,8 @@ function startUpstream() {
         ...process.env,
         OPENCODE_SERVER_USERNAME: upstreamUsername,
         OPENCODE_SERVER_PASSWORD: upstreamPassword,
-        WSLENV: `${inherited}OPENCODE_SERVER_USERNAME/u:OPENCODE_SERVER_PASSWORD/u`
+        OPENCODE_CONFIG_CONTENT: modelConfig,
+        WSLENV: `${inherited}OPENCODE_SERVER_USERNAME/u:OPENCODE_SERVER_PASSWORD/u:OPENCODE_CONFIG_CONTENT/u`
       }
     }
   );
@@ -243,12 +288,14 @@ function startUpstream() {
   });
 }
 
-function ensureOpenCodeModelCatalog() {
-  try {
-    if (!fs.existsSync(openCodeConfigFile)) return;
-    const original = fs.readFileSync(openCodeConfigFile, "utf8");
-    const normalizedOriginal = original.replace(/^(?:\uFEFF|ï»¿)+/, "");
-    const config = JSON.parse(normalizedOriginal);
+function openCodeModelLaunchConfig(content = "") {
+    const config = content ? JSON.parse(content) : {};
+    const object = value => value && typeof value === "object" && !Array.isArray(value);
+    if (!object(config) || (config.provider !== undefined && !object(config.provider)) ||
+        (config.provider?.openai !== undefined && !object(config.provider.openai)) ||
+        (config.provider?.openai?.models !== undefined && !object(config.provider.openai.models))) {
+      throw new Error("Invalid inline OpenCode provider configuration.");
+    }
     config.provider = config.provider && typeof config.provider === "object" ? config.provider : {};
 
     const openai = config.provider.openai && typeof config.provider.openai === "object" ? config.provider.openai : {};
@@ -257,6 +304,9 @@ function ensureOpenCodeModelCatalog() {
       openai.models[id] = {
         ...(openai.models[id] || {}),
         name,
+        reasoning: true,
+        tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
         limit: { context: 1050000, output: 128000 },
         variants: Object.fromEntries(efforts.map((reasoningEffort) => [reasoningEffort, { reasoningEffort }]))
       };
@@ -265,7 +315,23 @@ function ensureOpenCodeModelCatalog() {
     registerOpenAIModel("gpt-6.1-sol", "GPT-6.1 Sol", ["low", "medium", "high", "xhigh", "max"]);
     registerOpenAIModel("gpt-6-sol", "GPT-6 Sol", ["none", "low", "medium", "high", "xhigh", "max"]);
     registerOpenAIModel("gpt-6-luna", "GPT-6 Luna", ["none", "low", "medium", "high", "xhigh", "max"]);
+    // Registration cannot surface a model excluded by an existing provider allowlist.
+    // Extend only an existing list; unrestricted configurations stay unrestricted.
+    if (Array.isArray(openai.whitelist)) {
+      openai.whitelist = [...new Set([
+        ...openai.whitelist, "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"
+      ])];
+    }
     config.provider.openai = openai;
+    return JSON.stringify(config);
+}
+
+function ensureOpenCodeModelCatalog() {
+  try {
+    if (!fs.existsSync(openCodeConfigFile)) return;
+    const original = fs.readFileSync(openCodeConfigFile, "utf8");
+    const normalizedOriginal = original.replace(/^(?:\uFEFF|ï»¿)+/, "");
+    const config = JSON.parse(openCodeModelLaunchConfig(normalizedOriginal));
 
     if (fs.existsSync(ternaryBonsaiWeights)) {
       const bonsai = config.provider.bonsai && typeof config.provider.bonsai === "object" ? config.provider.bonsai : {};
@@ -307,7 +373,7 @@ function waitForUpstream(attempt = 0) {
 
 function serveStatic(request, response) {
   const pathname = new URL(request.url, `http://${request.headers.host || `${host}:${publicPort}`}`).pathname;
-  if (pathname.startsWith("/workspace/assets/")) {
+  if (pathname.startsWith("/workspace/assets/") && !staticFiles.has(pathname)) {
     let relative;
     try { relative = decodeURIComponent(pathname.slice("/workspace/assets/".length)); }
     catch { return false; }
@@ -938,9 +1004,35 @@ function restartPlaywrightBridge(directory, callback) {
   });
 }
 
-const maintenance = require('./scripts/maintenance-server').createMaintenance({ root: installDirectory, distribution: wslDistribution, linuxHome: wslLinuxHome, shutdown });
+const activity = require('./scripts/activity-server').createActivity({ root: installDirectory, distribution: wslDistribution, linuxHome: wslLinuxHome });
+const { createActivityStartup, localPreferenceBoundary } = require('./scripts/activity-server');
+const activityStartup = createActivityStartup({ root: installDirectory, start: options => activity.start(options) });
+const maintenance = require('./scripts/maintenance-server').createMaintenance({ root: installDirectory, distribution: wslDistribution, linuxHome: wslLinuxHome, shutdown, activity });
+const phoneAccess = require('./scripts/phone-access-control.cjs').createPhoneAccessControl({ port: publicPort });
+const nvidiaSpeech = require('./scripts/nvidia-speech.cjs').createNvidiaSpeech({ authFile: path.win32.join(wslHome, '.local', 'share', 'opencode', 'auth.json') });
 
 function handleWorkspaceEndpoint(request, response, pathname) {
+  if (nvidiaSpeech.handle(request, response, pathname, json)) return true;
+  if (pathname === '/workspace/phone-access' || pathname.startsWith('/workspace/phone-access/')) {
+    phoneAccess.handle(request, (status, result) => json(response, status, result));
+    return true;
+  }
+  if (pathname === '/workspace/activity/preferences') {
+    try { localPreferenceBoundary(request, publicPort); }
+    catch (error) { json(response, error.statusCode || 403, { error: error.message }); return true; }
+    if (request.method === 'GET') {
+      try { json(response, 200, activityStartup.get()); } catch (error) { json(response, error.statusCode || 409, { error: error.message }); }
+    } else readJsonBody(request, (error, body) => {
+      if (error) return json(response, 400, { error: 'Invalid Activity startup preference.' });
+      try { json(response, 200, activityStartup.set(body)); } catch (failure) { json(response, failure.statusCode || 409, { error: failure.message }); }
+    });
+    return true;
+  }
+  if (pathname === '/workspace/activity' || pathname.startsWith('/workspace/activity/')) {
+    const query = new URL(request.url, `http://${host}:${publicPort}`).searchParams;
+    activity.handle(request, pathname, query).then(result => json(response, 200, result)).catch(error => json(response, error.statusCode || 503, { error: error.message }));
+    return true;
+  }
   const maintenanceActions = { '/workspace/updates/check': ['GET', 'check'], '/workspace/updates/install': ['POST', 'update'], '/workspace/engine-updates/check': ['GET', 'engineCheck'], '/workspace/engine-updates/install': ['POST', 'engineUpdate'], '/workspace/agent-trail/start': ['POST', 'startTrail'] };
   if (maintenanceActions[pathname]) {
     const [method, action] = maintenanceActions[pathname];
@@ -987,7 +1079,7 @@ function handleWorkspaceEndpoint(request, response, pathname) {
       try {
         if (!["strict", "recommended", "trusted"].includes(body.profile)) throw new Error("Unknown approval profile.");
         const config = JSON.parse(fs.readFileSync(openCodeConfigFile, "utf8"));
-        const sensitive = ["edit", "bash", "task", "external_directory", "webfetch", "websearch", "playwright_*", "blender_*"];
+        const sensitive = ["edit", "bash", "task", "external_directory", "webfetch", "websearch", "playwright_*", "seneschal_moli_*", "blender_*"];
         config.permission ||= {};
         sensitive.forEach((key) => { config.permission[key] = "ask"; });
         config.permission.read = body.profile === "strict" ? "ask" : { "*": "allow", "*.env": "ask", "*.env.*": "ask", "*.env.example": "allow" };
@@ -1162,23 +1254,22 @@ function handleWorkspaceEndpoint(request, response, pathname) {
     usageEstimate((usage) => json(response, 200, usage));
     return true;
   }
-  if (pathname === "/workspace/backup" && request.method === "POST") {
-    if (!fs.existsSync(backupScript)) return json(response, 404, { error: "Backup script is missing." });
-    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", backupScript], { detached: true, stdio: "ignore", windowsHide: true });
-    child.unref();
-    return json(response, 202, { started: true });
+  if (pathname === "/workspace/backup" || pathname === "/workspace/backup/status") {
+    try {
+      localPreferenceBoundary(request, publicPort);
+      if (pathname === "/workspace/backup/status" && request.method === "GET") return json(response, 200, backups.status());
+      if (pathname === "/workspace/backup" && request.method === "POST") {
+        void backups.start().catch(() => {});
+        return json(response, 202, { phase: 'running', message: 'Creating and verifying a private history backup…' });
+      }
+      return json(response, 405, { error: 'Unsupported backup operation.' });
+    } catch { return json(response, 409, { error: 'Manage backups from Seneschal on this PC. Backup status could not be read safely.' }); }
   }
   return false;
 }
 
 function scheduleWeeklyBackup() {
-  if (!fs.existsSync(backupScript)) return;
-  const marker = path.join(dataDirectory, "last-backup-started.txt");
-  const last = fs.existsSync(marker) ? Number(fs.readFileSync(marker, "utf8")) : 0;
-  if (Date.now() - last < 7 * 86400000) return;
-  fs.writeFileSync(marker, String(Date.now()), "utf8");
-  const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", backupScript], { detached: true, stdio: "ignore", windowsHide: true });
-  child.unref();
+  void backups.weekly().catch(() => console.warn('Automatic backup did not complete. Check Backup status in Settings.'));
 }
 
 function listenWithRetry(server, port, label) {
@@ -1231,6 +1322,7 @@ function startCustomProxy() {
     proxyUpgrade(request, socket, head, true);
   });
   proxy.once("listening", () => {
+    void activityStartup.run();
     startClassicProxy();
     openWorkspace();
   });
@@ -1298,11 +1390,13 @@ function startServers() {
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  phoneAccess.dispose();
   proxy?.close();
   classicProxy?.close();
   if (upstream && !upstream.killed) upstream.kill();
   if (bonsaiRuntime && !bonsaiRuntime.killed) bonsaiRuntime.kill();
-  setTimeout(() => process.exit(code), 180);
+  const deadline = setTimeout(() => process.exit(code), 6500);
+  activity.dispose().finally(() => { clearTimeout(deadline); process.exit(code); });
 }
 
 process.on("SIGINT", () => shutdown(0));

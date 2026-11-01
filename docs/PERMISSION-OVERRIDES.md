@@ -1,0 +1,19 @@
+# Conversation permission correction
+
+The old Seneschal prompt code sent `tools: true` for every available tool in Build mode (and for allowed board tools). OpenCode 1.19 converts those flags into wildcard `allow` rules and persists them on the conversation. Those rules take precedence over the agent's configured `ask` rules. Restarting the engine does not remove them.
+
+The correction leaves permitted tools unspecified, inheriting the engine's configured permissions. Restricted modes send only denials; Chat and observer mode deny all tools, including tools added later. Board workers, board planning and slash commands use the same permission preflight. No prompt can grant tool approval.
+
+Before sending in an older conversation with a generated-style tool rule set, Seneschal asks whether to use its configured permissions. Cancel sends nothing and preserves the draft. After consent, Seneschal checks that the conversation is idle, its rules have not changed, and the running engine is the verified 1.19.0 release. The next normal prompt replaces the old tool flags inside the engine, before its execution loop begins. Restricted modes send only their denials; unrestricted mode uses a deny-only marker for the reserved, nonexistent tool `__seneschal_inherit_policy__`. That marker grants nothing and leaves actual tool decisions to the current agent/configuration, without freezing a copy of its rules. A marker collision or unverified engine version stops submission. Older conversations must send a normal message before using slash commands; new conversations do not need this migration. Custom patterned permission rules are not silently replaced; use a new conversation if they conflict with restricted mode. Resetting a conversation's overrides is not the same as revoking the engine's separately remembered approval choices.
+
+Important engine contract: the 1.19.0 session PATCH handler concatenates permission rules, so `permission: []` does not clear anything. A successful HTTP acknowledgement is not evidence that old grants were removed. The regression fixture models that merge behavior rather than pretending PATCH replaces rules. The normal-prompt replacement is gated to the release whose source was inspected; no fallback reset request or duplicate prompt is sent.
+
+New conversations do not require the reset. Old conversations are not migrated in the background. Existing running tasks are not stopped. A failed or uncertain reset never submits work, and an uncertain prompt response is never automatically retried. These checks reduce races but do not provide an engine-level atomic compare-and-swap or cross-device exactly-once guarantee.
+
+Each network request has its own timeout. No timeout runs while the user reads the native reset confirmation. Delivery failures remain visible beside the prompt, including when the composer is minimized; a later explicit submission clears that notice.
+
+The private gateway now exposes bounded variant names as empty option objects. This restores the mobile Thinking selector without exposing provider-specific variant settings. The actual engine remains responsible for applying the selected variant.
+
+After installation, reload PC and phone pages for prompt changes. Restart phone access when convenient so the gateway loads its new sanitizer; stopping phone access revokes paired browsers, so pair again if needed. No full PC reboot is needed. Verify actual approval behavior in a fresh test conversation; synthetic and offline browser tests are not proof of a real device approval.
+
+Engine source: [prompt conversion and persistence](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/session/prompt.ts), [tool permission merge](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/session/tools.ts).

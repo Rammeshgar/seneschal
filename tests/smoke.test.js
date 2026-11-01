@@ -35,6 +35,7 @@ test("machine settings are discovered and requested model additions preserve pro
   assert.match(server, /settings\.json/);
   assert.match(server, /SENESCHAL_WSL_DISTRO/);
   assert.match(server, /registerOpenAIModel\("gpt-6-astra", "GPT-6 Astra"/);
+  assert.match(server, /openai\.models\[id\]/);
   assert.match(server, /original\.replace\(\/\^\(\?:\\uFEFF\|ï»¿\)\+\//);
   assert.match(server, /Ternary-Bonsai-27B-PQ2_0\.gguf/);
   assert.match(server, /bonsai\.models\["ternary-bonsai-27b"\]/);
@@ -78,7 +79,7 @@ test("workspace pulse uses fixed OpenCode work and ambient event buckets", () =>
 test("public launch materials reference privacy-safe visual assets", () => {
   const readme = read("README.md");
   assert.match(readme, /assets\/social\/seneschal-social-preview\.png/);
-  assert.match(readme, /(?:docs\/images\/seneschal-workspace-night\.png|github\.com\/user-attachments\/assets\/)/);
+  assert.match(readme, /docs\/images\/seneschal-workspace-night\.png/);
   assert.match(readme, /docs\/images\/seneschal-agent-board-night\.png/);
   assert.match(readme, /privacy-safe product illustration/);
   assert.ok(fs.existsSync(path.join(root, "assets/social/seneschal-linkedin-launch.png")));
@@ -169,32 +170,19 @@ test("model choices are isolated per session and background work survives naviga
   assert.doesNotMatch(selectSession, /\/abort/);
 });
 
-test("current OpenAI and configured local Ternary models are available in Seneschal", () => {
+test("current OpenAI models are registered with the engine, never fabricated in the picker", () => {
   const app = read("app/app.js");
   const server = read("server.js");
   assert.match(app, /openai: \["gpt-6-astra", "gpt-6\.1-sol", "gpt-6-sol", "gpt-6-luna"/);
-  assert.match(app, /currentOpenAIModels/);
-  assert.match(app, /openAIModel\("gpt-6\.1-sol", "GPT-6\.1 Sol"/);
-  assert.match(app, /openAIModel\("gpt-6-luna", "GPT-6 Luna"/);
+  assert.doesNotMatch(app, /providerModels\.push\(model\)/);
+  assert.match(app, /const providerModels = Object\.values\(provider\.models \|\| \{\}\)/);
   assert.match(server, /registerOpenAIModel\("gpt-6\.1-sol", "GPT-6\.1 Sol"/);
   assert.match(server, /registerOpenAIModel\("gpt-6-luna", "GPT-6 Luna"/);
-  assert.match(app, /providerModels\.push\(model\)/);
+  assert.match(server, /OPENCODE_CONFIG_CONTENT: modelConfig/);
+  assert.match(server, /OPENCODE_CONFIG_CONTENT\/u/);
   assert.match(app, /bonsai: \["ternary-bonsai-27b"\]/);
   assert.match(app, /configuredLocal = provider\.id === "bonsai" && provider\.source === "custom"/);
   assert.match(app, /\["openai", "bonsai", "google", "opencode", "deepseek"\]/);
-});
-
-test("model picker supports searchable collapsible provider categories", () => {
-  const html = read("app/index.html");
-  const app = read("app/app.js");
-  const css = read("app/styles.css");
-  assert.match(html, /id="modelSearchInput"/);
-  assert.match(html, /id="modelPickerGroups"/);
-  assert.match(app, /function renderModelPicker/);
-  assert.match(app, /model-provider-group/);
-  assert.match(app, /data-model-value/);
-  assert.match(css, /\.model-provider-group\[open\]/);
-  assert.match(css, /\.model-picker-option\.selected/);
 });
 
 test("Agent Board coordinates real sessions with persistent dependency handoffs", () => {
@@ -262,28 +250,6 @@ test("composer controls wrap cleanly when zoom reduces available width", () => {
   assert.match(styles, /\.composer-tools \{[^}]*flex-wrap: wrap/);
   assert.match(styles, /@container \(max-width: 720px\)/);
   assert.match(styles, /\.send-group \{ width: 100%; justify-content: flex-end; \}/);
-});
-
-test("approvals remain visible and projects have safe display-name controls", () => {
-  const html = read("app/index.html");
-  const app = read("app/app.js");
-  assert.match(app, /function mergePermissionSnapshot/);
-  assert.match(app, /permissionMisses\[permission\.id\] < 10/);
-  assert.match(app, /refreshDirectoryData[\s\S]*mergePermissionSnapshot/);
-  assert.match(app, /permissionDirectory = state\.sessions\.find/);
-  assert.match(html, /renameProjectDialog/);
-  assert.match(app, /seneschal-project-aliases/);
-  assert.match(app, /data-rename-project/);
-  assert.match(app, /function saveProjectName/);
-});
-
-test("Plus usage controls open OpenAI's official allowance dashboard", () => {
-  const html = read("app/index.html");
-  const app = read("app/app.js");
-  assert.match(html, /openChatGPTUsageButton/);
-  assert.match(html, /settingsChatGPTUsageButton/);
-  assert.match(app, /https:\/\/chatgpt\.com\/codex\/settings\/usage/);
-  assert.match(app, /function openChatGPTUsage/);
 });
 
 test("Visual Studio Code bridge opens WSL projects and provides an in-editor AI workspace", () => {
@@ -374,7 +340,7 @@ test("temporary port overlap retries instead of crashing", () => {
   assert.match(server, /function listenWithRetry/);
   assert.match(server, /retries < 40/);
   assert.match(server, /setTimeout\(\(\) => server\.listen\(port, host\), 250\)/);
-  assert.match(server, /proxy\.once\("listening", \(\) => \{\s*startClassicProxy\(\);\s*openWorkspace\(\);/);
+  assert.match(server, /proxy\.once\("listening", \(\) => \{\s*void activityStartup\.run\(\);\s*startClassicProxy\(\);\s*openWorkspace\(\);/);
 });
 
 test("workspace avoids the legacy 4096 and 4098 port conflict", () => {

@@ -11,6 +11,11 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/workspace/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="/workspace/icon-192.png" />
     <link rel="stylesheet" href="/workspace/styles.css" />
+    <link rel="stylesheet" href="/workspace/activity.css" />
+    <link rel="stylesheet" href="/workspace/phone-access.css" />
+    <link rel="stylesheet" href="/workspace/questions.css" />
+    <link rel="stylesheet" href="/workspace/ares.css" />
+    <link rel="stylesheet" href="/workspace/wallpapers.css" />
   </head>
   <body>
     <div class="ambient ambient-one" aria-hidden="true"></div>
@@ -26,10 +31,10 @@
         <div class="top-model">
           <div class="model-select-wrap" id="modelPicker">
             <span class="provider-orb" id="providerOrb"></span>
-            <button class="model-picker-button" id="modelPickerButton" type="button" aria-label="Select AI model" aria-haspopup="listbox" aria-expanded="false"><span id="modelPickerLabel">Select model</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button>
+            <button class="model-picker-button" id="modelPickerButton" type="button" aria-label="Select AI model" aria-haspopup="listbox" aria-expanded="false"><span id="modelPickerLabel" data-model-name="false">Select model</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button>
             <select id="modelSelect" aria-label="Active AI model" hidden></select>
             <div class="model-picker-menu" id="modelPickerMenu" hidden>
-              <label class="model-picker-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="modelSearchInput" type="search" placeholder="Search models…" autocomplete="off" aria-label="Search models" /></label>
+              <div class="model-picker-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="modelSearchInput" type="search" placeholder="Search models…" autocomplete="off" aria-label="Search models" /><button id="closeModelPickerButton" class="model-picker-close" type="button" aria-label="Close model picker">×</button></div>
               <div class="model-picker-groups" id="modelPickerGroups" role="listbox" aria-label="Available AI models"></div>
               <div class="model-picker-empty" id="modelPickerEmpty" hidden>No matching models</div>
             </div>
@@ -70,6 +75,11 @@
             <kbd>Ctrl N</kbd>
           </button><button class="icon-button panel-toggle" id="leftPanelToggle" title="Minimize left panel" aria-label="Minimize left projects and sessions panel" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M6.5 9.5 4 12l2.5 2.5"/></svg></button></div>
 
+        <nav class="compact-nav compact-left-nav" aria-label="Quick navigation">
+          <button type="button" class="compact-rail-button compact-new-session" id="compactNewSession" aria-label="New session" title="New session"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button type="button" class="compact-rail-button" id="compactProjects" aria-label="Show projects" title="Projects" aria-controls="projectsRailSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V4h6l2 3h10v13H3z"/></svg></button>
+          <button type="button" class="compact-rail-button" id="compactSessions" aria-label="Show sessions" title="Sessions" aria-controls="sessionsRailSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4zM8 8h8M8 12h5"/></svg></button>
+        </nav>
         <div class="side-scroll">
           <section class="rail-section" id="projectsRailSection">
             <div class="rail-heading"><span>Projects</span><span class="rail-heading-actions"><button class="rail-collapse-button" id="projectsCollapseButton" type="button" aria-label="Minimize projects" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button><button id="addProjectButton" aria-label="Add project">+</button></span></div>
@@ -88,21 +98,30 @@
         </div>
 
         <div class="sidebar-footer">
-          <button class="motion-switch" id="motionSwitch" aria-label="Switch welcome animation" title="Switch welcome animation"><span class="pixel-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="motionLabel">Orbit</span></button>
+          <button class="motion-switch wallpaper-shortcut" id="motionSwitch" type="button" aria-label="Open wallpaper themes" aria-haspopup="dialog" aria-controls="atmosphereDialog" title="Wallpaper themes"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="9" r="1.5"/><path d="m3 17 6-5 4 4 3-3 5 4"/></svg><span class="wallpaper-shortcut-label">Wallpapers</span><small id="motionLabel">Orbit</small></button>
+          <button class="rail-link" id="activityRailButton" aria-label="Activity" title="Activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Activity</span><small>LOCAL</small></button>
+          <button class="rail-link workspace-tools-trigger" id="workspaceToolsButton" type="button" popovertarget="workspaceToolsPanel" aria-label="Workspace tools" title="Workspace tools" aria-expanded="false" aria-controls="workspaceToolsPanel"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Workspace tools</span><span class="workspace-tools-chevron" aria-hidden="true">⌃</span></button>
+          <div class="workspace-tools-panel" id="workspaceToolsPanel" popover="auto" role="region" aria-labelledby="workspaceToolsTitle">
+          <h2 id="workspaceToolsTitle">Workspace tools</h2>
+          <button class="rail-link" id="workspaceRefreshButton" type="button" aria-describedby="workspaceRefreshStatus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M18.1 15A7 7 0 1 1 17 6.1L20 9"/></svg><span>Refresh workspace</span></button>
+          <p id="workspaceRefreshStatus" role="status" aria-live="polite" aria-atomic="true">Reload data without restarting or stopping tasks.</p>
+          <p>Boards & conversations</p>
           <button class="rail-link agent-board-rail-link" id="agentBoardRailButton"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="15" width="7" height="6" rx="1"/><path d="M6.5 10v2.5H12V15m5.5-5v2.5H12"/></svg><span>Agent Board</span><small id="agentBoardRailCount">0</small></button>
           <button class="rail-link board-history-rail-link" id="agentBoardHistoryRailButton"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v4H3zM8 12h8M8 16h5"/></svg><span>Board history</span><small id="agentBoardHistoryRailCount">0</small></button>
           <button class="rail-link" id="instructionsRailButton"><svg viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/></svg>Instructions</button>
           <button class="rail-link chatgpt-rail-link" id="chatGPTRailButton"><span class="chatgpt-mini-mark" aria-hidden="true">C</span><span>ChatGPT Chat</span><small>CHAT</small></button>
+          <p>Account allowance</p>
+          <button class="account-usage-card" id="openChatGPTUsageButton" type="button" title="Open the official Work and Codex usage dashboard">
+            <span>Plus agent usage</span><strong>View remaining allowance</strong><small>Official 5-hour and weekly limits</small>
+          </button>
+          <button class="rail-link" id="classicButton"><svg viewBox="0 0 24 24"><path d="M14 5h5v5M10 14 19 5M19 14v5H5V5h5"/></svg>Classic OpenCode</button>
+          </div>
           <div class="usage-card">
             <div><span>Context usage</span><strong id="usagePercent">0%</strong></div>
             <div class="meter"><i id="usageMeter"></i></div>
             <small id="usageDetail">Ready for a new session</small>
           </div>
-          <button class="account-usage-card" id="openChatGPTUsageButton" type="button" title="Open the official Work and Codex usage dashboard">
-            <span>Plus agent usage</span><strong>View remaining allowance</strong><small>Official 5-hour and weekly limits</small>
-          </button>
           <button class="rail-link" id="settingsRailButton"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.08V21h-4v-.92a1.7 1.7 0 0 0-1.08-.68 1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.08-.04H3v-4h.92A1.7 1.7 0 0 0 4.6 8.88 1.7 1.7 0 0 0 4.26 7l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.08V3h4v.92A1.7 1.7 0 0 0 15.12 4.6 1.7 1.7 0 0 0 17 4.26l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.4.3.76.6 1l.08.04H21v4h-.92a1.7 1.7 0 0 0-.68 1.08Z"/></svg>Settings</button>
-          <button class="rail-link" id="classicButton"><svg viewBox="0 0 24 24"><path d="M14 5h5v5M10 14 19 5M19 14v5H5V5h5"/></svg>Classic OpenCode</button>
         </div>
       </aside>
 
@@ -156,32 +175,71 @@
             <button class="resume-follow" id="resumeFollowButton" type="button" hidden>Jump to latest</button>
           </div>
 
-          <div class="permission-dock" id="permissionDock" hidden></div>
+          <div class="conversation-bottom" id="conversationBottom">
+          <div class="conversation-notices" id="conversationNotices" role="region" aria-label="Permissions and questions" tabindex="0">
+            <section class="permission-dock" id="permissionDock" aria-label="Permission required" hidden></section>
+            <section class="question-dock" id="questionDock" aria-label="Pending question" hidden></section>
+          </div>
 
           <form class="composer" id="composerForm">
             <div class="composer-topline"><span id="composerProject">No project selected</span><span class="composer-top-actions"><span id="modelCapability" hidden>Text + tools</span><button type="button" id="composerMinimizeButton" aria-label="Minimize message input" hidden>Minimize</button><button type="button" id="composerSizeButton" aria-label="Maximize message input" title="Expand prompt">↗</button></span></div>
-            <textarea id="promptInput" rows="1" placeholder="Describe the desired state, ask a question, or use / for commands…" aria-label="Message Seneschal"></textarea>
+            <div class="composer-body" id="composerBody">
+            <p class="connection-recovery-status" id="connectionRecoveryStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+            <textarea id="promptInput" rows="1" placeholder="Describe the desired state, ask a question, or use / for commands…" aria-label="Message Seneschal" aria-describedby="promptDeliveryStatus"></textarea>
+            <p class="prompt-delivery-status" id="promptDeliveryStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
             <div class="attachment-strip" id="attachmentStrip" hidden></div>
+            <p class="ares-availability" id="aresAvailability" role="status" aria-live="polite" hidden></p>
+            </div>
             <div class="composer-footer">
-              <div class="composer-tools">
-                <button class="skills-compose-button" id="skillsButton" type="button" title="Choose instructions and skills" aria-label="Open Instructions Studio"><svg viewBox="0 0 24 24"><path d="M7 3h10v5H7zM4 12h7v8H4zM14 12h6v8h-6z"/></svg><span>Skills</span><b id="activeSkillCount">0</b></button>
-                <label class="attach-button" title="Attach files">
-                  <input id="fileInput" type="file" multiple hidden />
+                <input id="fileInput" type="file" multiple hidden />
+                <button class="attach-button" id="attachFilesButton" type="button" title="Attach files" aria-label="Attach files">
                   <svg viewBox="0 0 24 24"><path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5L13 2a4 4 0 0 1 5.7 5.7l-9.9 9.9a2 2 0 1 1-2.8-2.8l9.2-9.2"/></svg>
-                </label>
-                <button class="mic-button" id="micButton" type="button" title="Dictate or record a voice message" aria-label="Start voice dictation or recording" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/></svg><span>Mic</span></button>
-                <button class="talk-button" id="talkButton" type="button" title="Start turn-by-turn voice conversation" aria-label="Start Talk mode" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 12h2m2-4v8m3-11v14m3-11v8m3-6v4m3-3v2"/></svg><span>Talk</span><i aria-hidden="true"></i></button>
-                <span class="browser-compose-group"><button class="browser-compose-button" id="browserButton" type="button" title="Give the agent a browser task" aria-label="Open agent browser controls"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></svg><span>Browser</span></button><button class="browser-window-button" id="browserWindowButton" type="button" title="Show the agent-controlled Brave window" aria-label="Show the agent-controlled Brave window" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg><span>Show</span></button></span>
-                <label class="select-wrap agent-select-wrap model-variant-wrap" id="modelVariantWrap" hidden><span>Thinking</span><select id="modelVariantSelect" aria-label="Model thinking level"></select></label>
+                  <span>Upload</span>
+                </button>
+              <details class="composer-options" id="composerOptions">
+                <summary id="composerOptionsSummary" aria-label="Prompt options" aria-controls="composerOptionsPanel">Options <span aria-hidden="true">⌃</span><span id="composerVoiceStatus" role="status" aria-live="polite" hidden></span></summary>
+                <div class="composer-tools" id="composerOptionsPanel" role="group" aria-label="Agent, thinking and skills">
                 <label class="select-wrap agent-select-wrap"><span>Agent</span><select id="agentSelect" aria-label="Agent mode"></select></label>
-              </div>
-              <div class="send-group">
-                <span class="send-hint">Enter to send · Shift Enter for line</span>
+                <label class="select-wrap agent-select-wrap model-variant-wrap" id="modelVariantWrap" hidden><span>Thinking</span><select id="modelVariantSelect" aria-label="Model thinking level"></select></label>
+                <button class="skills-compose-button" id="skillsButton" type="button" title="Choose instructions and skills" aria-label="Open Instructions Studio"><svg viewBox="0 0 24 24"><path d="M7 3h10v5H7zM4 12h7v8H4zM14 12h6v8h-6z"/></svg><span>Skills</span><b id="activeSkillCount">0</b></button>
+                <span class="browser-compose-group"><button class="browser-compose-button" id="browserButton" type="button" title="Give the agent a browser task" aria-label="Open agent browser controls"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></svg><span>Browser</span></button><button class="browser-window-button" id="browserWindowButton" type="button" title="Show the agent-controlled Brave window" aria-label="Show the agent-controlled Brave window" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg><span>Show</span></button></span>
+                </div>
+              </details>
+              <div class="send-group" role="group" aria-label="Voice and message actions">
+                <button class="ares-toggle" id="aresToggle" type="button" aria-label="Show or hide Seneschal companion" aria-controls="aresCompanion" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="13" rx="5"/><path d="M9 10h.01M15 10h.01M9 14q3 2 6 0M12 2v3M8 18v3m8-3v3"/></svg><span>Mascot</span><small id="aresToggleState">Hidden</small></button>
+                <span class="composer-voice-group" role="group" aria-label="Voice">
+                  <button class="voice-button" id="voiceButton" data-active="none" type="button" aria-pressed="false" aria-label="Start Talk mode" title="Start Talk — sends spoken turns and reads replies"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/></svg><span class="voice-label">Voice</span></button>
+                  <button class="voice-menu-button" id="voiceMenuButton" type="button" popovertarget="voiceOptionsPanel" aria-controls="voiceOptionsPanel" aria-expanded="false" aria-label="Voice options" title="Voice options"><svg class="voice-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+                </span>
+                <span class="voice-live-controls" role="group" aria-label="Talk audio controls" hidden>
+                  <button class="voice-mute-button" type="button" data-voice-mute="mic" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/><path class="mute-slash" d="m3 3 18 18"/></svg></button>
+                  <button class="voice-mute-button" type="button" data-voice-mute="speaker" aria-label="Mute speaker" aria-pressed="false" title="Mute speaker"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4V4Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="mute-slash" d="m3 3 18 18"/></svg></button>
+                </span>
+                <div class="voice-options-panel" id="voiceOptionsPanel" popover="auto" role="region" aria-labelledby="voiceOptionsTitle">
+                  <h2 id="voiceOptionsTitle">Voice</h2>
+                  <label class="nvidia-voice-service" for="voiceServiceSelect">Voice service<select id="voiceServiceSelect" aria-describedby="voiceServiceHelp"><option value="browser">Browser voice</option><option value="nvidia">NVIDIA cloud · developer trial</option></select></label>
+                  <p id="voiceServiceHelp">The chat model and its billing stay unchanged. NVIDIA Talk uses English, up to 20 seconds per turn. Long spoken replies are shortened; full text stays in chat.</p>
+                  <p id="voiceFeedback" role="status" aria-live="polite">Browser voice is separate from NVIDIA speech. Choose your voice service above.</p>
+                  <div class="voice-audio-settings" role="group" aria-label="Audio privacy controls"><button class="voice-mute-button" type="button" data-voice-mute="mic" aria-label="Mute microphone" aria-pressed="false"><span data-mute-label>Mute mic</span></button><button class="voice-mute-button" type="button" data-voice-mute="speaker" aria-label="Mute speaker" aria-pressed="false"><span data-mute-label>Mute speaker</span></button></div>
+                  <p id="voiceMuteStatus" role="status" aria-live="polite">Mic on · Speaker on</p>
+                  <div id="nvidiaVoiceNotice" hidden>
+                    <p id="nvidiaVoiceDisclosure">NVIDIA receives microphone audio and reply text for speech. Trial inputs and outputs may be logged; avoid sensitive content. Free access has limits and is not guaranteed unlimited. No paid fallback is used.</p>
+                    <label class="nvidia-voice-consent"><input type="checkbox" id="nvidiaVoiceConsent" aria-describedby="nvidiaVoiceDisclosure" />I agree to send audio and reply text to NVIDIA for this developer trial.</label>
+                    <button type="button" class="secondary-button" id="checkNvidiaVoice" disabled>Check voice access</button>
+                    <p id="nvidiaVoiceStatus" role="status" aria-live="polite">Nothing is recorded until you start Talk.</p>
+                  </div>
+                  <button class="mic-button" id="micButton" type="button" title="Dictate or record a voice message" aria-label="Start voice dictation or recording" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/></svg><span>Dictate</span><small>Add speech to your draft</small></button>
+                  <button class="talk-button" id="talkButton" type="button" title="Start turn-by-turn voice conversation" aria-label="Start Talk mode" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h2m2-4v8m3-11v14m3-11v8m3-6v4m3-3v2"/></svg><span>Talk</span><i aria-hidden="true"></i><small>Send spoken turns & hear replies</small></button>
+                  <p>Dictation stays in your draft. Talk sends your spoken turns automatically. If dictation is unavailable, Mic records an audio attachment.</p>
+                  <label class="ares-setting"><input type="checkbox" id="aresEnabled" aria-describedby="aresHelp" />Show Seneschal companion</label>
+                  <p id="aresHelp">Your Seneschal mascot animates locally, with its own chest badge. NVIDIA mouth movement reacts to playback volume; browser-voice mouth movement is approximate, not phoneme-accurate lip sync.</p>
+                </div>
                 <button class="stop-button" id="composerStopButton" type="button" hidden><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg><span>Stop</span></button>
-                <button class="send-button" id="sendButton" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+                <button class="send-button" id="sendButton" type="submit" aria-label="Send message" title="Send message (Enter); Shift Enter for a new line"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
               </div>
             </div>
           </form>
+          </div>
         </section>
 
         <aside class="inspector" id="inspector">
@@ -190,17 +248,38 @@
             <span class="inspector-head-actions"><button class="icon-button panel-toggle" id="rightPanelToggle" title="Minimize right panel" aria-label="Minimize right agent context panel" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16m2.5-10.5L20 12l-2.5 2.5"/></svg></button><button class="icon-button mobile-inspector-close" id="closeInspectorButton" aria-label="Close inspector">×</button></span>
           </section>
 
-          <section class="inspector-block">
+          <nav class="compact-nav compact-context-nav" aria-label="Agent context shortcuts">
+            <button type="button" class="compact-rail-button" id="compactPermissions" data-context-section="permissions" aria-label="Show permissions" title="Permissions" aria-controls="inspectorPermissionsSection" aria-describedby="compactPermissionStatus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="M12 8v5m0 3h.01"/></svg><span id="compactPermissionBadge" class="compact-rail-badge" hidden aria-hidden="true"></span><span class="compact-sr-only" id="compactPermissionStatus">No waiting approvals</span></button>
+            <button type="button" class="compact-rail-button" id="compactTools" data-context-section="tools" aria-label="Show active tools" title="Active tools" aria-controls="inspectorToolsSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6 4 4m-5-7a6 6 0 0 0-7 7l-4 4a3 3 0 0 0 4 4l4-4a6 6 0 0 0 7-7l-4 4-4-4z"/></svg></button>
+            <button type="button" class="compact-rail-button" id="compactProviders" data-context-section="providers" aria-label="Show providers" title="Providers" aria-controls="inspectorProvidersSection"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6"/></svg></button>
+            <button type="button" class="compact-rail-button" id="compactPulse" data-context-section="pulse" aria-label="Show workspace pulse" title="Workspace pulse" aria-controls="inspectorPulseSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></button>
+          </nav>
+          <div class="ares-sidebar-slot" id="aresSidebarSlot"></div>
+
+          <section class="inspector-block latency-block inspector-pulse collapsed" id="inspectorPulseSection" data-inspector-section="pulse">
+            <div class="block-title"><span>Workspace pulse</span><small id="pulseLabel">STANDBY</small></div>
+            <div class="pulse-summary" aria-label="Activity during the last 60 seconds"><span>Work <strong id="eventRate">0</strong></span><span>Ambient <strong id="ambientRate">0</strong></span><small>Last 60s</small></div>
+            <div class="pulse-details" id="workspacePulseDetails">
+              <div class="pulse-bars" aria-label="OpenCode work and ambient events during the last minute, shown in ten fixed six-second intervals"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="pulse-axis"><span>60 seconds ago</span><span>Now</span></div>
+              <div class="pulse-legend"><span class="work">Work</span><span class="ambient">Ambient</span></div>
+              <div class="pulse-meta"><span>Session work <strong id="eventCount">0</strong></span><span>Engine <strong id="versionText">—</strong></span></div>
+            </div>
+          </section>
+
+          <div class="inspector-content" id="inspectorContent">
+
+          <section class="inspector-block" id="inspectorPermissionsSection" data-inspector-section="permissions">
             <div class="block-title"><span>Permissions</span><button type="button" class="inline-settings-button" id="openApprovalButton">Manage</button></div>
             <div class="policy-list" id="policyList"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
           </section>
 
-          <section class="inspector-block">
+          <section class="inspector-block" id="inspectorToolsSection" data-inspector-section="tools">
             <div class="block-title"><span>Active tools</span><small id="toolCount">—</small></div>
             <div class="tool-grid" id="toolGrid"></div>
           </section>
 
-          <section class="inspector-block browser-block">
+          <section class="inspector-block browser-block" data-inspector-section="browser">
             <div class="block-title"><span>Agent browser</span><small id="browserState">CHECKING</small></div>
             <div class="browser-card" id="browserCard">
               <div class="browser-card-top"><span class="browser-glyph"><i></i><i></i><i></i></span><div><strong>Playwright Brave</strong><small id="browserDetail">Checking the isolated Brave bridge</small></div></div>
@@ -208,7 +287,7 @@
             </div>
           </section>
 
-          <section class="inspector-block integrations-block">
+          <section class="inspector-block integrations-block" data-inspector-section="creative">
             <div class="block-title"><span>Creative bridge</span><small id="blenderState">CHECKING</small></div>
             <div class="integration-card" id="blenderCard">
               <span class="integration-mark">B</span>
@@ -217,7 +296,7 @@
             </div>
           </section>
 
-          <section class="inspector-block integrations-block">
+          <section class="inspector-block integrations-block" data-inspector-section="code">
             <div class="block-title"><span>Code workspace</span><small id="vscodeState">CHECKING</small></div>
             <div class="integration-card vscode-card" id="vscodeCard">
               <span class="integration-mark vscode-mark">&lt;/&gt;</span>
@@ -226,26 +305,19 @@
             </div>
           </section>
 
-          <section class="inspector-block budget-block">
+          <section class="inspector-block budget-block" data-inspector-section="budget">
             <div class="block-title"><span>Paid API guard</span><small id="budgetState">$10 TARGET</small></div>
             <div class="budget-meter"><i id="budgetMeter"></i></div>
             <div class="budget-copy"><strong id="budgetAmount">Checking…</strong><small>Last 30 days · estimate</small></div>
           </section>
 
-          <section class="inspector-block provider-block">
+          <section class="inspector-block provider-block" id="inspectorProvidersSection" data-inspector-section="providers">
             <div class="block-title"><span>Providers</span><small id="providerCount">—</small></div>
             <div class="provider-list" id="providerList"></div>
           </section>
 
-          <section class="inspector-block latency-block">
-            <div class="block-title"><span>Workspace pulse</span><small id="pulseLabel">STANDBY</small></div>
-            <div class="pulse-bars" aria-label="OpenCode work and ambient events during the last minute, shown in ten fixed six-second intervals"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-            <div class="pulse-axis"><span>60 seconds ago</span><span>Now</span></div>
-            <div class="pulse-legend"><span class="work">Work</span><span class="ambient">Ambient</span></div>
-            <div class="pulse-meta"><span>Work · 60s <strong id="eventRate">0</strong></span><span>Ambient · 60s <strong id="ambientRate">0</strong></span><span>Session work <strong id="eventCount">0</strong></span><span>Engine <strong id="versionText">—</strong></span></div>
-          </section>
-
           <button class="protocol-button" id="protocolButton"><span><i></i>Inspect protocol log</span><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+          </div>
         </aside>
       </main>
     </div>
@@ -296,15 +368,20 @@
       <form method="dialog">
         <div class="modal-kicker">SENESCHAL CONTROL</div>
         <h2>Workspace settings</h2>
+        <div class="language-settings">
+          <label for="interfaceLanguage"><span>Interface language</span><select id="interfaceLanguage" aria-describedby="interfaceLanguageHelp"><option value="en" lang="en" dir="ltr">English</option><option value="fa" lang="fa" dir="rtl">فارسی</option></select></label>
+          <p id="interfaceLanguageHelp">Changes buttons and help on this browser only. Conversations, code, voice and model settings stay unchanged.</p>
+          <p id="interfaceLanguageStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+        </div>
         <div class="settings-grid">
           <button class="setting-card interactive-setting" type="button" id="settingsUpdatesButton"><span>App and engine updates</span><strong>Check for updates</strong><small>Check and update Seneschal and OpenCode separately</small></button>
-          <button class="setting-card interactive-setting" type="button" id="settingsTrailButton"><span>Agent activity</span><strong>Live dashboard / Agent Trail</strong><small>Inspect live events and OpenCode session history</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsTrailButton"><span>Agent activity</span><strong>Activity workspace</strong><small>History, tool activity, usage, and local service</small></button>
           <button class="setting-card interactive-setting" type="button" id="openInstructionsButton"><span>Instructions Studio</span><strong id="settingsInstructions">Ready</strong><small>Persona, rules, agent roles, and skills</small></button>
           <button class="setting-card interactive-setting chatgpt-setting" type="button" id="settingsChatGPTButton"><span>ChatGPT companion</span><strong>Normal Chat</strong><small>Separate ChatGPT allowance · opens securely</small></button>
           <button class="setting-card interactive-setting chatgpt-usage-setting" type="button" id="settingsChatGPTUsageButton"><span>Plus agent usage</span><strong>Official usage dashboard</strong><small>Check remaining 5-hour and weekly Work/Codex allowance</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsEngineButton"><span>Engine</span><strong id="settingsEngine">OpenCode</strong><small>Open the complete OpenCode controls</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsThemeButton"><span>Theme</span><strong id="settingsTheme">Night Studio</strong><small>Switch between the day and night palettes</small></button>
-          <button class="setting-card interactive-setting motion-setting" type="button" id="settingsMotionButton"><span>Workspace atmosphere</span><strong id="settingsMotion">Orbit Drift</strong><small>Cycle motion environments or choose still mode</small></button>
+          <button class="setting-card interactive-setting motion-setting" type="button" id="settingsMotionButton"><span>Workspace atmosphere</span><strong id="settingsMotion">Orbit Drift</strong><small>Nine pixel worlds, including the restored Citylight</small></button>
           <button class="setting-card interactive-setting provider-setting" type="button" id="settingsProvidersButton"><span>Providers</span><strong id="settingsProviders">—</strong><small>Connect Zen, Gemini, DeepSeek, and other model providers</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsBrowserButton"><span>Agent browser</span><strong id="settingsBrowser">Checking</strong><small>Open a browser task</small></button>
           <button class="setting-card interactive-setting board-setting" type="button" id="settingsAgentBoardButton"><span>Agent Board</span><strong id="settingsAgentBoard">Ready</strong><small>Coordinate specialist sessions and handoffs</small></button>
@@ -314,13 +391,60 @@
           <button class="setting-card interactive-setting" type="button" id="settingsBudgetButton"><span>Paid API target</span><strong id="settingsBudget">$10 / month</strong><small>Review providers and set provider-side limits</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsVoiceButton"><span>Conversation voice</span><strong id="settingsVoice">Turn-by-turn · Ready</strong><small>Start or stop spoken conversation mode</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsApprovalButton"><span>Approval policy</span><strong>Ask before action</strong><small>Review Plan and Build permissions</small></button>
-          <button class="setting-card interactive-setting" type="button" id="settingsBackupsButton"><span>Private backups</span><strong>Weekly</strong><small>Create a sanitized backup now</small></button>
+          <button class="setting-card interactive-setting" type="button" id="settingsBackupsButton" aria-describedby="backupStatus"><span>Private backups · PC only</span><strong>Verified history snapshots</strong><small>Weekly when Seneschal launches, or back up now. Private content—not a shareable export.</small></button>
           <button class="setting-card interactive-setting" type="button" id="settingsCommandsButton"><span>Commands</span><strong id="settingsCommands">Loading…</strong><small>Browse OpenCode commands, skills, and session references</small></button>
           <button class="setting-card interactive-setting archive-setting" type="button" id="settingsArchivesButton"><span>Archived sessions</span><strong id="settingsArchives">0 archived</strong><small>Review and restore conversations hidden from the sidebar</small></button>
         </div>
         <p class="settings-note"><strong>Privacy, honestly:</strong> this interface runs locally, but your selected cloud model receives prompts and any file, browser, or Blender context needed for the task. Provider sign-in and API keys stay in OpenCode.</p>
-        <div class="modal-actions"><button type="button" id="backupNowButton" class="secondary-button">Back up now</button><button value="cancel" class="secondary-button">Close</button><button type="button" id="settingsClassicButton" class="primary-button">Open advanced settings</button></div>
+        <p id="backupStatus" class="settings-note" role="status" aria-live="polite" aria-atomic="true">Backups include private conversation text. Sign-in stores and pairing tokens are excluded. Projects and browser-only preferences need separate backups.</p>
+        <div class="modal-actions"><button type="button" id="backupNowButton" class="secondary-button" aria-describedby="backupStatus">Back up now</button><button type="button" id="backupStatusButton" class="secondary-button">Check backup status</button><button value="cancel" class="secondary-button">Close</button><button type="button" id="settingsClassicButton" class="primary-button">Open advanced settings</button></div>
       </form>
+    </dialog>
+
+    <dialog class="modal atmosphere-modal" id="atmosphereDialog" aria-labelledby="atmosphereHeading" aria-describedby="atmosphereIntro">
+      <header class="atmosphere-header">
+        <div><div class="atmosphere-kicker">WORKSPACE ATMOSPHERES / 01—09</div><h2 id="atmosphereHeading">Somewhere worth returning to.</h2><p id="atmosphereIntro">Four living Seneschal originals. Five worlds from Afterlight. These gallery images are still thumbnails: explore a full scene to see its motion and six interactions. Changes save automatically in this browser.</p></div>
+        <button type="button" class="atmosphere-close" id="atmosphereClose" aria-label="Close atmosphere collection" autofocus>×</button>
+      </header>
+      <div class="atmosphere-body">
+        <div class="atmosphere-gallery" id="atmosphereGallery"></div>
+        <aside class="atmosphere-controls" aria-label="Atmosphere customization">
+          <div class="atmosphere-kicker">YOUR CURRENT WORLD</div><h3 id="atmosphereName">Orbit Drift</h3><p id="atmosphereDescription"></p>
+          <button type="button" class="primary-button atmosphere-preview-button" id="atmospherePreviewButton">Explore full scene ↗</button>
+          <div class="atmosphere-button-row"><button type="button" class="secondary-button" id="atmospherePause" aria-pressed="false">Pause motion</button><button type="button" class="secondary-button" id="atmosphereNext">Next world →</button></div>
+          <fieldset id="atmosphereSceneControls"><legend>This scene</legend>
+            <label class="atmosphere-control" for="atmospherePalette"><span>Color story</span><select id="atmospherePalette" data-pref="palette" data-scene="true"><option value="auto">Follow day / night</option><option value="nocturne">Nocturne · cool midnight</option><option value="ember">Ember · warm dusk</option><option value="sakura">Sakura · violet evening</option></select></label>
+            <div id="atmosphereWeatherControls"><label class="atmosphere-control" for="atmosphereWeather"><span id="atmosphereWeatherLabel">Weather</span><select id="atmosphereWeather" data-pref="weather" data-scene="true"><option value="clear">Clear</option><option value="rain">Rain</option><option value="snow">Snow</option><option value="mist">Mist</option></select></label>
+            <label class="atmosphere-control" for="atmosphereIntensity"><span><span id="atmosphereIntensityLabel">Weather strength</span><output id="atmosphereIntensityValue" for="atmosphereIntensity">55%</output></span><input id="atmosphereIntensity" type="range" min="0" max="100" data-pref="intensity" data-scene="true" /></label></div>
+            <label class="atmosphere-control" for="atmosphereActivity"><span><span id="atmosphereActivityLabel">World activity</span><output id="atmosphereActivityValue" for="atmosphereActivity">60%</output></span><input id="atmosphereActivity" type="range" min="0" max="100" data-pref="worldActivity" data-scene="true" /></label>
+            <label class="atmosphere-control" for="atmosphereGlow"><span><span id="atmosphereGlowLabel">Ambient glow</span><output id="atmosphereGlowValue" for="atmosphereGlow">60%</output></span><input id="atmosphereGlow" type="range" min="0" max="100" data-pref="worldGlow" data-scene="true" /></label>
+            <label class="atmosphere-check"><input id="atmosphereFeature" type="checkbox" data-pref="worldFeature" data-scene="true" /><span id="atmosphereFeatureLabel">Signature scene details</span></label>
+            <button type="button" class="secondary-button" id="atmosphereReset">Reset this scene</button>
+            <div class="atmosphere-actions" id="atmosphereActions" aria-label="Scene interactions"></div>
+          </fieldset>
+          <fieldset><legend>Workspace comfort</legend>
+            <label class="atmosphere-control" for="atmosphereStrength"><span>Home visibility <output id="atmosphereStrengthValue" for="atmosphereStrength">78%</output></span><input id="atmosphereStrength" type="range" min="0" max="100" data-pref="strength" /></label>
+            <label class="atmosphere-control" for="atmosphereConversationStrength"><span>Conversation visibility <output id="atmosphereConversationStrengthValue" for="atmosphereConversationStrength">18%</output></span><input id="atmosphereConversationStrength" type="range" min="0" max="40" data-pref="conversationStrength" /></label>
+            <label class="atmosphere-check"><input id="atmosphereAnimateConversation" type="checkbox" data-pref="animateConversation" aria-describedby="atmosphereConversationHint" /><span>Animate during conversations</span></label>
+            <p class="atmosphere-comfort-hint" id="atmosphereConversationHint">Conversations use a still frame by default. Home and full-scene previews animate unless motion is paused or system Reduced motion is on.</p>
+            <button type="button" class="secondary-button atmosphere-quiet-action" id="atmosphereEnableConversation" hidden>Enable conversation animation</button>
+            <label class="atmosphere-control" for="atmosphereQuality"><span>Frame-rate limit</span><select id="atmosphereQuality" data-pref="quality"><option value="15">15 fps · economical</option><option value="30">30 fps · balanced</option><option value="60">60 fps · smooth</option></select></label>
+          </fieldset>
+          <fieldset><legend>Automatic rotation</legend>
+            <label class="atmosphere-check"><input id="atmosphereRotation" type="checkbox" data-pref="rotation" /><span>Rotate through all nine worlds</span></label>
+            <label class="atmosphere-control" for="atmosphereMinutes"><span>Change scene every</span><select id="atmosphereMinutes" data-pref="minutes"><option value="1">1 minute</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
+            <label class="atmosphere-check"><input id="atmosphereShuffle" type="checkbox" data-pref="shuffle" /><span>Shuffle without immediate repeats</span></label>
+            <p>Rotation waits while hidden, paused, previewing or in a quiet conversation. No catch-up jumps when you return.</p>
+          </fieldset>
+        </aside>
+      </div>
+      <footer class="atmosphere-footer"><p id="atmosphereStatus" role="status" aria-live="polite">Local rendering</p><span class="atmosphere-local">LOCAL ART · NO AUDIO CAPTURE · NO AI CALLS</span></footer>
+    </dialog>
+
+    <dialog class="atmosphere-preview" id="atmospherePreview" aria-labelledby="atmospherePreviewName" aria-describedby="atmospherePreviewStatus">
+      <header class="atmosphere-preview-header"><div><h2 id="atmospherePreviewName">Scene preview</h2><p id="atmospherePreviewStatus">Live animation · click a detail or press 1–6 · Esc to return</p><p class="atmosphere-hover-label" id="atmosphereHoverLabel">Explore the details, or use the six action buttons below.</p></div><button type="button" class="atmosphere-close" id="atmospherePreviewClose" aria-label="Return to atmosphere collection" autofocus>×</button></header>
+      <div class="atmosphere-preview-stage" id="atmospherePreviewStage"><div class="atmosphere-hotspots" id="atmosphereHotspots" aria-label="Clickable scene details" hidden></div></div>
+      <footer class="atmosphere-preview-footer"><div class="atmosphere-preview-interactions"><div class="atmosphere-actions" id="atmospherePreviewActions" aria-label="Scene interactions"></div><p id="atmosphereActionFeedback" role="status" aria-live="polite" aria-atomic="true">Six actions · use the buttons, numbered keys, or scene hotspots.</p></div><div class="atmosphere-preview-tools"><button type="button" class="secondary-button" id="atmosphereShowHotspots" aria-pressed="false" aria-controls="atmosphereHotspots">Show hotspots</button><button type="button" class="secondary-button" id="atmospherePreviewPause" aria-pressed="false">Pause</button><button type="button" class="secondary-button" id="atmospherePreviewNext">Next world →</button></div></footer>
     </dialog>
 
     <dialog class="modal archive-manager-modal" id="archivedSessionsDialog">
@@ -592,6 +716,42 @@
     </dialog>
 
     <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+    <section class="ares-companion" id="aresCompanion" aria-label="Seneschal voice companion" hidden>
+      <header><button class="ares-drag" type="button" id="aresDrag" aria-label="Move Seneschal; drag or use arrow keys" title="Drag to move; arrow keys also move">Seneschal <span aria-hidden="true">⠿</span></button><button type="button" id="aresMinimize" aria-label="Minimize Seneschal" aria-expanded="true" aria-controls="aresCanvas">−</button><button type="button" id="aresMaximize" aria-label="Maximize Seneschal" aria-pressed="false">⛶</button><button type="button" id="aresClose" aria-label="Hide Seneschal companion">×</button></header>
+      <div class="ares-canvas" id="aresCanvas" role="img" tabindex="0" aria-label="Seneschal 3D view; drag to rotate the camera, or use arrow keys" aria-describedby="aresCameraHelp"></div>
+      <p class="ares-status" id="aresStatus" role="status" aria-live="polite">Idle</p>
+      <button class="ares-retry" id="aresRetry" type="button" hidden>Retry loading Seneschal</button>
+      <p class="ares-voice-feedback" id="aresVoiceFeedback" role="status" aria-live="polite" hidden></p>
+      <footer class="ares-controls" id="aresControls">
+        <button type="button" id="aresMotion" aria-label="Pause Seneschal motion" aria-pressed="false">Ⅱ</button>
+        <button class="ares-layout-button" type="button" id="aresLayoutButton" popovertarget="aresLayoutPanel">Layout</button>
+        <span class="ares-audio-controls" role="group" aria-label="Companion audio controls"><button class="voice-mute-button" type="button" data-voice-mute="mic" aria-label="Mute microphone" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/><path class="mute-slash" d="m3 3 18 18"/></svg><span data-mute-label>Mute mic</span></button><button class="voice-mute-button" type="button" data-voice-mute="speaker" aria-label="Mute speaker" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4V4Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="mute-slash" d="m3 3 18 18"/></svg><span data-mute-label>Mute speaker</span></button></span>
+        <button class="ares-layout-button" type="button" id="aresCameraHome" aria-label="Reset Seneschal camera to front view" hidden>Front</button>
+        <button class="ares-talk" type="button" id="aresTalk" hidden>Start Talk</button>
+        <button class="ares-resize" type="button" id="aresResize" aria-label="Resize Seneschal; drag or use arrow keys" title="Drag to resize; arrow keys also resize">↘</button>
+      </footer>
+      <div class="ares-layout-popup" id="aresLayoutPanel" popover="auto" role="group" aria-label="Seneschal position, size and camera">
+        <p>Move Seneschal</p><div class="ares-layout-arrows"><button type="button" data-ares-move="left" aria-label="Move Seneschal left">←</button><button type="button" data-ares-move="up" aria-label="Move Seneschal up">↑</button><button type="button" data-ares-move="down" aria-label="Move Seneschal down">↓</button><button type="button" data-ares-move="right" aria-label="Move Seneschal right">→</button></div>
+        <div class="ares-layout-sizes"><button type="button" data-ares-size="-1">Smaller</button><button type="button" data-ares-size="1">Larger</button></div>
+        <button class="ares-reset" type="button" id="aresDock">Dock at bottom right</button>
+        <p id="aresCameraHelp">Drag the character to rotate. Drag its header to move.</p>
+        <div class="ares-layout-arrows"><button type="button" data-ares-orbit="left" aria-label="Rotate camera left">↶</button><button type="button" data-ares-orbit="up" aria-label="Rotate camera up">↑</button><button type="button" data-ares-orbit="down" aria-label="Rotate camera down">↓</button><button type="button" data-ares-orbit="right" aria-label="Rotate camera right">↷</button></div>
+        <div class="ares-layout-sizes"><button type="button" id="aresCameraReset">Front view</button><button type="button" id="aresReset">Reset layout</button></div>
+      </div>
+    </section>
+    <dialog class="ares-stage" id="aresStage" aria-label="Full-screen Seneschal voice companion"></dialog>
+    <script src="/workspace/ares.js" defer></script>
+    <script src="/workspace/questions.js" defer></script>
+    <script src="/workspace/nvidia-speech.js" defer></script>
+    <script src="/workspace/wallpapers/legacy-worlds.js" defer></script>
+    <script src="/workspace/wallpapers/citylight-world.js" defer></script>
+    <script src="/workspace/wallpapers/afterlight-worlds.js" defer></script>
+    <script src="/workspace/wallpapers/afterlight-engine.js" defer></script>
+    <script src="/workspace/wallpapers.js" defer></script>
     <script src="/workspace/app.js" defer></script>
+    <script src="/workspace/maintenance.js" defer></script>
+    <script src="/workspace/markdown.js" defer></script>
+    <script src="/workspace/activity.js" defer></script>
+    <script src="/workspace/phone-access.js" defer></script>
   </body>
 </html>
