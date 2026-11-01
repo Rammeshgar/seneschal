@@ -41,9 +41,9 @@ It is not an AI model, a provider subscription, or a way around provider usage l
 
 ## Interface
 
-![Seneschal night workspace with Lunar Relay and the 3D companion](docs/images/seneschal-workspace-night.png)
+![Seneschal night workspace with city wallpaper and the 3D companion](docs/images/seneschal-workspace-night.png)
 
-The image above is a privacy-safe screenshot of the current interface, showing the Lunar Relay wallpaper, compact sidebar shortcuts, prompt controls and Seneschal companion. It contains no personal conversations or provider credentials.
+The image above is a privacy-safe screenshot of the current interface, showing the softened city wallpaper, compact sidebar shortcuts, prompt controls and Seneschal companion. It contains no personal conversations or provider credentials.
 
 ### Session organization and readability
 

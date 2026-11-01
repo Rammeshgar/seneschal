@@ -4,7 +4,7 @@ Only public, privacy-safe product visuals and demos belong here. Reference them 
 
 Current assets:
 
-- `seneschal-workspace-night.svg` — editable source artwork
-- `seneschal-workspace-night.png` — README-ready export
+- `seneschal-workspace-night.svg` — earlier editable product illustration
+- `seneschal-workspace-night.png` — current, owner-provided interface screenshot used by the README
 
-The workspace image is an accurate product illustration, not a literal user-session screenshot. This keeps provider names, prompts, projects, and personal files out of the public repository.
+The PNG shows the welcome screen, city wallpaper, compact sidebars and Seneschal companion with an empty prompt. It contains no personal conversations or provider credentials. The SVG is separate historical artwork, not the source of the current PNG.
