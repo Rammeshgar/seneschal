@@ -41,9 +41,9 @@ It is not an AI model, a provider subscription, or a way around provider usage l
 
 ## Interface
 
-![Privacy-safe illustration of the Seneschal night workspace](docs/images/seneschal-workspace-night.png)
+![Seneschal night workspace with Lunar Relay and the 3D companion](docs/images/seneschal-workspace-night.png)
 
-The image above is a privacy-safe product illustration based on the real interface. It shows the three-part workspace, approval controls, activity reporting, and local bridge status without exposing a user's sessions or provider account.
+The image above is a privacy-safe screenshot of the current interface, showing the Lunar Relay wallpaper, compact sidebar shortcuts, prompt controls and Seneschal companion. It contains no personal conversations or provider credentials.
 
 ### Session organization and readability
 

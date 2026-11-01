@@ -81,7 +81,7 @@ test("public launch materials reference privacy-safe visual assets", () => {
   assert.match(readme, /assets\/social\/seneschal-social-preview\.png/);
   assert.match(readme, /docs\/images\/seneschal-workspace-night\.png/);
   assert.match(readme, /docs\/images\/seneschal-agent-board-night\.png/);
-  assert.match(readme, /privacy-safe product illustration/);
+  assert.match(readme, /privacy-safe (?:product illustration|screenshot)/);
   assert.ok(fs.existsSync(path.join(root, "assets/social/seneschal-linkedin-launch.png")));
 });
 
