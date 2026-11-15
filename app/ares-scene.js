@@ -51,8 +51,8 @@ export function createAresView(host, callbacks) {
     camera.position.set(horizontal * Math.sin(yaw), distance * Math.sin(pitch), horizontal * Math.cos(yaw)); camera.lookAt(0, 0, 0);
     host.dataset.cameraYaw = yaw.toFixed(3); host.dataset.cameraPitch = pitch.toFixed(3); renderOnce();
   }
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x445966, 2.1));
-  for (const [color, intensity, x, y, z] of [[0xffffff, 3.2, 3, 5, 4], [0x78ece2, 1.5, -3, 2, 3], [0xffeedc, 1.7, -2, 3, -3]]) {
+  scene.add(new THREE.HemisphereLight(0xf1f4ff, 0x637577, 1.95));
+  for (const [color, intensity, x, y, z] of [[0xfff6ea, 2.7, 3, 5, 4], [0xb6e8e3, 0.95, -3, 2, 3], [0xffe5cb, 2.0, -2, 3, -3]]) {
     const light = new THREE.DirectionalLight(color, intensity); light.position.set(x, y, z); scene.add(light);
   }
   const mouthNames = ['Mouth_Smile', 'viseme_AA', 'viseme_EE', 'viseme_OO', 'viseme_FV', 'viseme_MBP', 'viseme_L', 'viseme_TH'];
@@ -106,7 +106,7 @@ export function createAresView(host, callbacks) {
     scene.traverse(object => { object.geometry?.dispose(); for (const material of Array.isArray(object.material) ? object.material : object.material ? [object.material] : []) { for (const value of Object.values(material)) if (value?.isTexture) value.dispose(); material.dispose(); } });
   }
   (async () => {
-    const response = await fetch('/workspace/assets/ares/ares.glb?v=seneschal-head-v06', { credentials: 'same-origin', cache: 'no-store', signal: control.signal });
+    const response = await fetch('/workspace/assets/ares/ares.glb?v=seneschal-assembly-v07', { credentials: 'same-origin', cache: 'no-store', signal: control.signal });
     if (!response.ok) throw Error('Mascot asset unavailable');
     const bytes = await response.arrayBuffer();
     if (disposed) return;

@@ -8,7 +8,7 @@ Seneschal gives OpenCode a personal workspace on Windows and WSL: per-session mo
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
 
-**New here? Start with the [user guide](docs/USER-GUIDE.md).** It explains the controls, permission choices, voice, mascot, Activity, phone access and practical workflows in plain language. [Beta 20](https://github.com/Rammeshgar/seneschal/releases/tag/v0.2.1-beta.20) packages the current workspace for the existing Windows/WSL installer.
+**New here? Start with the [user guide](docs/USER-GUIDE.md).** It covers permissions, voice, the companion, Activity, phone access and everyday workflows. Download the packaged [Beta 20](https://github.com/Rammeshgar/seneschal/releases/tag/v0.2.1-beta.20) for the Windows/WSL installer.
 
 ## What it is
 
@@ -43,7 +43,15 @@ It is not an AI model, a provider subscription, or a way around provider usage l
 
 ![Seneschal night workspace with city wallpaper and the 3D companion](docs/images/seneschal-workspace-night.png)
 
-The image above is a privacy-safe screenshot of the current interface, showing the softened city wallpaper, compact sidebar shortcuts, prompt controls and Seneschal companion. It contains no personal conversations or provider credentials.
+Beta 20's Night Studio workspace shows the compact sidebars, prompt controls and city wallpaper.
+
+### 3D companion
+
+![Front and rear three-quarter views of the rebuilt Seneschal companion in the app renderer](docs/images/seneschal-companion-v07.png)
+
+The source build includes the revised Blender model. Fitted ceramic panels close around the chest badge, the arms articulate in fixed shoulder sockets, and the rear shell includes a flush service panel. The teal ring lights the hover base.
+
+The revised model was checked across 78 sampled poses in six animation states. Browser checks covered camera rotation and level-driven mouth animation at sidebar size. The self-contained [GLB used by the app](app/assets/ares/ares.glb) is available in this repository.
 
 ### Session organization and readability
 
