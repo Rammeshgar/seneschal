@@ -109,7 +109,7 @@ if (Test-Path -LiteralPath $settingsPath) {
 $settings['wslDistribution'] = $WslDistribution
 $settings['wslLinuxHome'] = $linuxHome
 $settings['launchDirectory'] = "$linuxHome/projects"
-$settings | ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath $settingsPath
+[IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 
 $homeParts = $linuxHome.TrimStart('/').Split('/')
 $wslHome = Join-Path "\\wsl.localhost\$WslDistribution" ($homeParts -join '\')
@@ -140,7 +140,7 @@ if (Test-Path -LiteralPath $openCodeJson) {
   $updatedOpenCodeText = $openCodeText.Replace($legacyForward, $installForward).Replace('Digital Servant planning mode', 'Seneschal planning mode').Replace('Digital Servant build mode', 'Seneschal build mode')
   if ($updatedOpenCodeText -ne $openCodeText) {
     Copy-Item -Force -LiteralPath $openCodeJson -Destination "$openCodeJson.before-seneschal"
-    $updatedOpenCodeText | Set-Content -Encoding utf8 -LiteralPath $openCodeJson
+    [IO.File]::WriteAllText($openCodeJson, $updatedOpenCodeText, [Text.UTF8Encoding]::new($false))
   }
   try { Get-Content -Raw -LiteralPath $openCodeJson | ConvertFrom-Json | Out-Null } catch { throw "The migrated OpenCode configuration is not valid JSON. The backup is at $openCodeJson.before-seneschal" }
 }

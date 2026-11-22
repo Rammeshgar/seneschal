@@ -21,8 +21,7 @@ const appDirectory = path.join(installDirectory, "app");
 const dataDirectory = path.join(installDirectory, "data");
 fs.mkdirSync(dataDirectory, { recursive: true });
 const settingsFile = path.join(dataDirectory, "settings.json");
-let localSettings = {};
-try { localSettings = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch { localSettings = {}; }
+const localSettings = require("./scripts/local-settings.cjs").readLocalSettings(settingsFile);
 const wslDistribution = process.env.SENESCHAL_WSL_DISTRO || process.env.DIGITAL_SERVANT_WSL_DISTRO || localSettings.wslDistribution || "Ubuntu";
 const inferredLinuxUser = String(process.env.USERNAME || "user").toLowerCase();
 const wslLinuxHome = process.env.SENESCHAL_WSL_HOME || process.env.DIGITAL_SERVANT_WSL_HOME || localSettings.wslLinuxHome || `/home/${inferredLinuxUser}`;

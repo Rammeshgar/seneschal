@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1-beta.22 — 2026-11-22
+
+- Fix clean installation on Windows PowerShell 5.1 when the Windows and WSL usernames differ: write UTF-8 without a byte-order mark and accept BOM-prefixed settings from previous installs.
+
 ## 0.2.1-beta.21 — 2026-11-22
 
 - Restore task plans, observed tool activity and explicitly available reasoning summaries after a page refresh or reconnect; distinguish live, last-seen and restored records without duplicating private history.

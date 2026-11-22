@@ -8,7 +8,7 @@ Seneschal gives OpenCode a personal workspace on Windows and WSL: per-session mo
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
 
-**New here? Start with the [user guide](docs/USER-GUIDE.md).** It covers permissions, voice, the companion, Activity, phone access and everyday workflows. Download the Windows/WSL installer from the [releases page](https://github.com/Rammeshgar/seneschal/releases). This source is Beta 21.
+**New here? Start with the [user guide](docs/USER-GUIDE.md).** It covers permissions, voice, the companion, Activity, phone access and everyday workflows. Download the Windows/WSL installer from the [releases page](https://github.com/Rammeshgar/seneschal/releases). This source is Beta 22.
 
 ## What it is
 
