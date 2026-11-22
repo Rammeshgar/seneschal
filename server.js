@@ -1006,12 +1006,21 @@ function restartPlaywrightBridge(directory, callback) {
 
 const activity = require('./scripts/activity-server').createActivity({ root: installDirectory, distribution: wslDistribution, linuxHome: wslLinuxHome });
 const { createActivityStartup, localPreferenceBoundary } = require('./scripts/activity-server');
+const agenttrailMap = require('./scripts/agenttrail-map-bridge.cjs').createAgenttrailMap({root:installDirectory,dataDirectory});
 const activityStartup = createActivityStartup({ root: installDirectory, start: options => activity.start(options) });
 const maintenance = require('./scripts/maintenance-server').createMaintenance({ root: installDirectory, distribution: wslDistribution, linuxHome: wslLinuxHome, shutdown, activity });
 const phoneAccess = require('./scripts/phone-access-control.cjs').createPhoneAccessControl({ port: publicPort });
 const nvidiaSpeech = require('./scripts/nvidia-speech.cjs').createNvidiaSpeech({ authFile: path.win32.join(wslHome, '.local', 'share', 'opencode', 'auth.json') });
 
 function handleWorkspaceEndpoint(request, response, pathname) {
+  if (pathname === '/workspace/agenttrail-map') {
+    try { localPreferenceBoundary(request, publicPort); }
+    catch(error){ return json(response,error.statusCode||403,{error:'PC-local map only.'}); }
+    if(request.method==='GET'){void agenttrailMap.status().then(result=>json(response,200,result),()=>json(response,503,{error:'Map unavailable.'}));return true;}
+    if(request.method!=='POST')return json(response,405,{error:'Method not allowed.'});
+    readJsonBody(request,(error,body)=>{if(error||!body||typeof body!=='object'||Array.isArray(body))return json(response,400,{error:'Invalid map event summary.'});agenttrailMap.submit(body);return json(response,200,{ok:true});});
+    return true;
+  }
   if (nvidiaSpeech.handle(request, response, pathname, json)) return true;
   if (pathname === '/workspace/phone-access' || pathname.startsWith('/workspace/phone-access/')) {
     phoneAccess.handle(request, (status, result) => json(response, status, result));
@@ -1322,6 +1331,7 @@ function startCustomProxy() {
     proxyUpgrade(request, socket, head, true);
   });
   proxy.once("listening", () => {
+    void agenttrailMap.start();
     void activityStartup.run();
     startClassicProxy();
     openWorkspace();
@@ -1390,6 +1400,7 @@ function startServers() {
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  agenttrailMap.dispose();
   phoneAccess.dispose();
   proxy?.close();
   classicProxy?.close();

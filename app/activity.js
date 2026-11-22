@@ -60,6 +60,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SeneschalC
   chatActivity.innerHTML = '<summary>Live agent activity</summary><div class="activity-chat-heading"><span>Latest progress for this chat</span><button type="button" class="activity-text-button">Inspect history</button></div><div class="chat-activity-list"></div>';
   document.querySelector('#attachmentStrip')?.after(chatActivity);
   chatActivity.querySelector('button').onclick = event => openSession(state.currentChat, event.currentTarget);
+  if(location.protocol==='http:'&&location.hostname==='127.0.0.1'){
+    const makeMapLink=()=>{const a=document.createElement('a');a.className='activity-text-button';a.href='http://127.0.0.1:5550/';a.target='_blank';a.rel='noopener noreferrer';a.textContent='Live Agenttrail Map ↗';a.hidden=true;return a;};
+    const headerLink=makeMapLink(),chatLink=makeMapLink();dialog.querySelector('.activity-header-actions').prepend(headerLink);chatActivity.querySelector('.activity-chat-heading').append(chatLink);
+    const checkMap=async()=>{try{const r=await fetch('/workspace/agenttrail-map',{credentials:'same-origin',cache:'no-store'});const d=r.ok?await r.json():null;const available=d?.enabled===true&&d?.running===true&&d?.url==='http://127.0.0.1:5550/';headerLink.hidden=chatLink.hidden=!available;}catch{headerLink.hidden=chatLink.hidden=true;}};
+    void checkMap();window.addEventListener('focus',checkMap);document.querySelector('#activityRailButton')?.addEventListener('click',checkMap);
+  }
   async function request(route, method = 'GET', controller, body) {
     const headers = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';

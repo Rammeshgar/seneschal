@@ -20,6 +20,8 @@ In **Settings → App updates**, check GitHub anytime and install a newer publis
 
 Open **Activity** for native Overview, Sessions, Usage and Service views. The optional pinned [Agent Trail](https://github.com/camtrik/agent-trail) runtime reads and indexes local OpenCode history; preparing it requires WSL, Node 22+, npm and internet. Live progress captured in the current window is separate from persistent history. Neither reveals private reasoning the provider does not expose. See [Activity integration](docs/ACTIVITY-INTEGRATION.md) and [startup](docs/ACTIVITY-STARTUP.md). Keep the history service's ports private.
 
+The optional [live Agenttrail Map](docs/agenttrail-map.md) is a separate, disabled-by-default PC-local visualization of observed OpenCode session and tool states. It uses pseudonymous session labels and does not read prompts, tool arguments, files or global coding-agent logs. It does not replace Activity token usage. Available in the current source; the existing packaged beta is unchanged.
+
 ### Voice, companion and personal workspace
 
 - Browser speech and optional **NVIDIA cloud voice** are separate from the selected chat model. Cloud speech requires explicit consent and supported provider access; trial limits and provider processing still apply. Mic and speaker have separate mute controls.

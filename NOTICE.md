@@ -1,5 +1,7 @@
 # Notices
 
+Optional Agenttrail Map observability is adapted from [sodiumsun/agenttrail](https://github.com/sodiumsun/agenttrail) 0.4.1 (MIT). The bundled source, license and provenance are in `scripts/vendor/agenttrail-map/`. It is an independent, opt-in local dashboard; it does not run or control agents.
+
 The bundled `reverse-engineer-anything` skill and its reference guides come from [morluto/rea](https://github.com/morluto/rea), under the MIT license included alongside the skill. This installs workflow instructions only, not the REA MCP server or analysis engines.
 
 Seneschal is an independent interface and local bridge created by Sadeq Rezai. It is not an AI model and is not affiliated with or endorsed by OpenCode, OpenAI, Anthropic, Google, DeepSeek, Brave, Microsoft, or Blender.

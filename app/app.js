@@ -419,6 +419,22 @@
     renderPulse();
   }
 
+  // Disabled by default; the optional local map receives only observed state
+  // and tool names. Raw IDs travel only to the authenticated PC-local host,
+  // where they are pseudonymized before forwarding to the isolated map.
+  const agenttrailFeed=(()=>{
+    if(location.protocol!=='http:'||location.hostname!=='127.0.0.1')return null;
+    const toolNames=new Set(['read','write','edit','glob','grep','list','bash','task','webfetch','websearch','todowrite','todoread','question']);
+    const events=[],seen=new Map();let enabled=false,sending=false,lastSent=0,timer;
+    async function check(){try{const r=await fetch('/workspace/agenttrail-map',{credentials:'same-origin',cache:'no-store'});const d=r.ok?await r.json():null;enabled=d?.enabled===true;if(enabled&&!timer)timer=setInterval(snapshot,5000);else if(!enabled&&timer){clearInterval(timer);timer=null;events.length=0;seen.clear();}}catch{enabled=false;if(timer){clearInterval(timer);timer=null;}events.length=0;seen.clear();}}
+    function record(payload){if(!enabled)return;const props=payload.properties||{},part=props.part||{};const sessionID=part.sessionID||props.sessionID||props.info?.sessionID||(['session.created','session.deleted'].includes(payload.type)?props.info?.id:'');if(typeof sessionID!=='string')return;
+      let kind='',tool='',callID='';if(payload.type==='session.created')kind='start';else if(payload.type==='session.deleted')kind='end';else if(payload.type==='session.idle')kind='idle';else if(payload.type==='session.status')kind=props.status?.type==='idle'?'idle':['busy','retry'].includes(props.status?.type)?'working':'';else if(payload.type==='message.part.updated'&&part.type==='tool'){kind=({running:'tool-start',completed:'tool-end',error:'tool-error'})[part.state?.status]||'';tool=toolNames.has(part.tool)?part.tool:'tool';callID=part.callID||part.id||'';}
+      if(!kind)return;const at=Date.now(),key=kind+':'+sessionID+':'+callID;if(at-(seen.get(key)||0)<3000)return;seen.set(key,at);if(seen.size>256)seen.delete(seen.keys().next().value);events.push({kind,sessionID,tool,callID,at});if(events.length>64)events.shift();
+    }
+    async function snapshot(){const now=Date.now();if(!enabled||sending||now-lastSent<4000||state.eventSource?.readyState!==EventSource.OPEN)return;sending=true;lastSent=now;try{const active=Object.entries(state.statuses||{}).filter(([,status])=>['busy','retry'].includes(status?.type)).slice(0,48).map(([id])=>id);await fetch('/workspace/agenttrail-map',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({connection:'online',agenttrailEvents:events,agenttrailActive:active})});}catch{}finally{sending=false;}}
+    void check();window.addEventListener('focus',check);window.addEventListener('pagehide',()=>{if(timer)clearInterval(timer);enabled=false;events.length=0;seen.clear();},{once:true});return {record,snapshot};
+  })();
+
   function toast(message, kind = "") {
     const item = document.createElement("div");
     item.className = `toast ${kind}`;
@@ -3571,6 +3587,7 @@
       try { payload = JSON.parse(event.data); } catch { return; }
       if (/^(session\.|message\.|permission\.)/.test(payload.type || "")) state.streamRevision = (state.streamRevision || 0) + 1;
       recordOpenCodeEvent(payload);
+      agenttrailFeed?.record(payload);if(agenttrailFeed)queueMicrotask(()=>void agenttrailFeed.snapshot());
       window.dispatchEvent(new CustomEvent('seneschal-activity', { detail: payload }));
       log(payload.type || "event", payload.properties?.sessionID || payload.id || "");
       const properties = payload.properties || {};
