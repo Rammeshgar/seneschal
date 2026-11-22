@@ -5,8 +5,10 @@ const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../app/app.js'), 'utf8');
 test('late messages cannot overwrite a different session or a newer refresh', async () => {
   const pending = [];
+  const restored = [];
   const state = { currentSessionID: 'a', messages: [] };
   const c = harness(['refreshMessages'], {
+    window: { SeneschalActivity: { restore: (id, messages) => restored.push([id, ...messages]) } },
     state, selectedSession: () => ({ id: state.currentSessionID, directory: '/project' }),
     api: () => new Promise(resolve => pending.push(resolve)),
     renderMessages() {}, renderUsage() {}, toast() {}
@@ -21,6 +23,7 @@ test('late messages cannot overwrite a different session or a newer refresh', as
   pending[3](['b-newer']); await newer;
   pending[2](['b-older']); await older;
   assert.deepEqual(state.messages, ['b-newer']);
+  assert.deepEqual(restored, [['b','b-current'], ['b','b-newer']]);
 });
 function harness(names, extras = {}) {
   const context = vm.createContext({ crypto: require('node:crypto'), Date, state: {}, ...extras });

@@ -8,7 +8,7 @@ Seneschal gives OpenCode a personal workspace on Windows and WSL: per-session mo
 
 This is a public beta. It is useful today, but it is not a replacement for understanding which model provider you are using or what an approved tool action can change.
 
-**New here? Start with the [user guide](docs/USER-GUIDE.md).** It covers permissions, voice, the companion, Activity, phone access and everyday workflows. Download the packaged [Beta 20](https://github.com/Rammeshgar/seneschal/releases/tag/v0.2.1-beta.20) for the Windows/WSL installer.
+**New here? Start with the [user guide](docs/USER-GUIDE.md).** It covers permissions, voice, the companion, Activity, phone access and everyday workflows. Download the Windows/WSL installer from the [releases page](https://github.com/Rammeshgar/seneschal/releases). This source is Beta 21.
 
 ## What it is
 
@@ -18,9 +18,11 @@ Responses render Markdown tables, headings, lists, quotes, and code blocks. Wide
 
 In **Settings → App updates**, check GitHub anytime and install a newer published ZIP release. Downloads must match GitHub's SHA-256 digest. The updater backs up managed app files under `data/update-*`, preserves `data`, `config`, and model/browser runtimes, then restarts. Stop active agents before updating. Source Git checkouts are deliberately excluded; update those with Git. Failures are recorded in `data/update.log`.
 
-Open **Activity** for native Overview, Sessions, Usage and Service views. The optional pinned [Agent Trail](https://github.com/camtrik/agent-trail) runtime reads and indexes local OpenCode history; preparing it requires WSL, Node 22+, npm and internet. Live progress captured in the current window is separate from persistent history. Neither reveals private reasoning the provider does not expose. See [Activity integration](docs/ACTIVITY-INTEGRATION.md) and [startup](docs/ACTIVITY-STARTUP.md). Keep the history service's ports private.
+Open **Live agent activity** in a chat to see its checklist, tool outcomes and available reasoning summaries. After a reload, session switch or reconnect, **Restored** entries come from that chat’s OpenCode records. **Live** marks updates received in this window; **Last seen** marks the last update before a disconnect. This panel works without a history service.
 
-The optional [live Agenttrail Map](docs/agenttrail-map.md) is a separate, disabled-by-default PC-local visualization of observed OpenCode session and tool states. It uses pseudonymous session labels and does not read prompts, tool arguments, files or global coding-agent logs. It does not replace Activity token usage. Available in the current source; the existing packaged beta is unchanged.
+Open **Activity** for Overview, Sessions, Usage and Service views. The optional pinned [Agent Trail](https://github.com/camtrik/agent-trail) runtime indexes local OpenCode history; preparing it requires WSL, Node 22+, npm and internet. See [Activity integration](docs/ACTIVITY-INTEGRATION.md) and [startup](docs/ACTIVITY-STARTUP.md). Keep the history service's ports private.
+
+The optional [live Agenttrail Map](docs/agenttrail-map.md) visualizes observed session and tool states locally. The optional official Sequential Thinking MCP supports numbered planning and revisions in the restored activity feed. The OpenAI picker supports GPT-6.2 Astra, GPT-6.2 Sol and GPT-6.1 Terra alongside existing registered models; provider access is required.
 
 ### Voice, companion and personal workspace
 

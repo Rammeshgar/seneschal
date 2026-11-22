@@ -31,7 +31,11 @@ const html = read('app/index.html').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g
           if (route === '/session') return [{ id: 'ses_fixture', directory: '/fixture' }];
           if (route === '/session/status') return { ses_fixture: { type: 'idle' } };
           if (route === '/permission') return [];
-          return [{ text: fixture.version }];
+           const completed = fixture.version !== 'initial';
+           return [{ text: fixture.version, info: { id: 'msg', role: 'assistant', sessionID: 'ses_fixture' }, parts: [{
+             type: 'tool', id: 'part', messageID: 'msg', sessionID: 'ses_fixture', tool: 'todowrite',
+             state: { status: completed ? 'completed' : 'running', output: 'private-output', input: { todos: [{ content: 'Verify ' + 'x'.repeat(160), status: 'completed' }] } }
+           }] }];
         };
         window.selectedSession = () => state.sessions.find(session => session.id === state.currentSessionID);
         window.normalizeSession = value => value; window.mergePermissionSnapshot = value => value;
@@ -45,8 +49,16 @@ const html = read('app/index.html').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g
         $('#promptInput').value = 'Keep my unsent draft';
         $('#composerForm').addEventListener('submit', event => { event.preventDefault(); fixture.writes++; });
       }, theme);
+      await page.addStyleTag({ content: read('app/activity.css') });
+      await page.addScriptTag({ content: read('app/activity.js') });
+      await page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent('seneschal-session-selected', { detail: 'ses_fixture' }));
+        document.querySelector('.chat-agent-activity').open = true;
+      });
       await page.addScriptTag({ content: code + '\nbindConnectionRecovery(); connectEvents();' });
       await page.waitForFunction(() => fixture.reads >= 5 && document.querySelector('#connectionRecoveryStatus').hidden);
+      const panel = page.locator('.chat-activity-list');
+      assert.match(await panel.textContent(), /Restored · todowrite · last recorded: running/);
       await page.locator('#promptInput').focus();
       await page.evaluate(() => { window.oldFixtureStream = state.eventSource; fixture.version = 'Completed while phone was disconnected'; });
       await context.setOffline(true);
@@ -54,6 +66,10 @@ const html = read('app/index.html').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g
       assert.equal(await page.evaluate(() => oldFixtureStream.closed), true);
       await context.setOffline(false);
       await page.waitForFunction(() => document.querySelector('#connectionRecoveryStatus').hidden && document.querySelector('#messageList').textContent.includes('Completed while phone was disconnected'));
+      assert.match(await panel.textContent(), /Plan · Restored.*Verify .*\(completed\)/);
+      assert.doesNotMatch(await panel.textContent(), /private-output|running/);
+      assert.equal(await panel.locator('ul li').count(), 1);
+      assert.ok(await panel.evaluate(el => el.clientWidth > 0 && el.scrollWidth <= el.clientWidth + 1));
       assert.equal(await page.locator('#promptInput').inputValue(), 'Keep my unsent draft');
       assert.equal(await page.locator('#promptInput').evaluate(el => document.activeElement === el), true);
       assert.equal(await page.evaluate(() => state.currentSessionID), 'ses_fixture');

@@ -308,18 +308,24 @@ function openCodeModelLaunchConfig(content = "") {
         tool_call: true,
         modalities: { input: ["text", "image"], output: ["text"] },
         limit: { context: 1050000, output: 128000 },
-        variants: Object.fromEntries(efforts.map((reasoningEffort) => [reasoningEffort, { reasoningEffort }]))
+        variants: Object.fromEntries([
+          ...efforts.map((reasoningEffort) => [reasoningEffort, { reasoningEffort }]),
+          ...efforts.map((reasoningEffort) => [`fast-${reasoningEffort}`, { reasoningEffort, serviceTier: "priority" }])
+        ])
       };
     };
     registerOpenAIModel("gpt-6-astra", "GPT-6 Astra", ["low", "medium", "high", "xhigh", "max"]);
     registerOpenAIModel("gpt-6.1-sol", "GPT-6.1 Sol", ["low", "medium", "high", "xhigh", "max"]);
     registerOpenAIModel("gpt-6-sol", "GPT-6 Sol", ["none", "low", "medium", "high", "xhigh", "max"]);
     registerOpenAIModel("gpt-6-luna", "GPT-6 Luna", ["none", "low", "medium", "high", "xhigh", "max"]);
+    registerOpenAIModel("gpt-6.2-astra", "GPT-6.2 Astra", ["low", "medium", "high", "xhigh", "max"]);
+    registerOpenAIModel("gpt-6.2-sol", "GPT-6.2 Sol", ["low", "medium", "high", "xhigh", "max"]);
+    registerOpenAIModel("gpt-6.1-terra", "GPT-6.1 Terra", ["none", "low", "medium", "high", "xhigh", "max"]);
     // Registration cannot surface a model excluded by an existing provider allowlist.
     // Extend only an existing list; unrestricted configurations stay unrestricted.
     if (Array.isArray(openai.whitelist)) {
       openai.whitelist = [...new Set([
-        ...openai.whitelist, "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"
+        ...openai.whitelist, "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-terra"
       ])];
     }
     config.provider.openai = openai;
@@ -1331,10 +1337,10 @@ function startCustomProxy() {
     proxyUpgrade(request, socket, head, true);
   });
   proxy.once("listening", () => {
-    void agenttrailMap.start();
     void activityStartup.run();
     startClassicProxy();
     openWorkspace();
+    void agenttrailMap.start();
   });
   listenWithRetry(proxy, publicPort, "Workspace");
 }

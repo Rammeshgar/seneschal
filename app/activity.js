@@ -24,11 +24,75 @@ const SeneschalChart = (() => {
   }
   return { series, valid, format, prepare };
 })();
-if (typeof module !== 'undefined' && module.exports) module.exports = SeneschalChart;
+// Only keep display fields for the selected chat. OpenCode owns the history.
+function createChatProgress() {
+  let session = '', revision = 0, rows = new Map(), loaded = false;
+  const clean = (value, limit) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
+  function project(part, messageID) {
+    if (!part || (part.sessionID && part.sessionID !== session) || (part.messageID && part.messageID !== messageID)) return null;
+    if (!messageID || !(part.id || part.callID) || part.redacted || part.isRedacted || part.ignored || part.metadata?.redacted) return null;
+    const key = JSON.stringify([messageID, part.id || part.callID]);
+    if (part.type === 'reasoning') {
+      // A reasoning part can contain private model text. Require an explicit summary.
+      const isSummary = part.format === 'summary';
+      const summary = clean(part.summary, 1200) || (isSummary ? clean(part.text, 1200) : '');
+      return summary ? { key, label: 'Reasoning summary', summary } : null;
+    }
+    if (part.type !== 'tool') return null;
+    const status = part.state?.status;
+    const row = { key, label: clean(part.tool, 120) || 'Tool', status: ['pending','running','completed','error','cancelled'].includes(status) ? status : 'unknown' };
+    if (/^sequential[_-]?thinking(?:[_-]sequential[_-]?thinking)?$/i.test(String(part.tool || ''))) {
+      const input = part.state?.input || {};
+      const positive = n => Number.isSafeInteger(n) && n > 0 && n <= 10000;
+      row.label = 'Sequential Thinking' + (positive(input.thoughtNumber) ? ` · Step ${input.thoughtNumber}` : '') + (positive(input.totalThoughts) ? ` of ${input.totalThoughts} (estimate)` : '') + (input.isRevision === true ? ' · revision' : '');
+    }
+    if (part.tool === 'todowrite' && status === 'completed') {
+      const todos = part.state.metadata?.todos ?? part.state.input?.todos;
+      if (Array.isArray(todos)) row.plan = todos.filter(todo => clean(todo?.content, 1000)).map(todo => ({
+        content: clean(todo.content, 1000), status: ['completed','pending','in_progress','cancelled'].includes(todo.status) ? todo.status : 'unknown'
+      }));
+    }
+    return row;
+  }
+  return {
+    select(id) { if (session !== id) { session = id; rows.clear(); revision++; loaded = false; } },
+    revision: () => revision,
+    restore(id, messages, since) {
+      if (!id || id !== session || !Array.isArray(messages)) return;
+      const next = new Map();
+      for (const message of messages) {
+        if (message?.info?.role !== 'assistant' || message.info.sessionID !== id || !Array.isArray(message.parts)) continue;
+        for (const part of message.parts) {
+          const data = project(part, message.info.id);
+          if (!data) continue;
+          const prior = rows.get(data.key);
+          next.set(data.key, prior?.live && JSON.stringify(prior.data) === JSON.stringify(data) ? prior : { data, live: false });
+        }
+      }
+      // A part update may have arrived after this read started.
+      for (const [key, item] of rows) if (item.revision > since) next.set(key, item);
+      rows = next; loaded = true;
+    },
+    update(part) {
+      if (!session || part?.sessionID !== session) return;
+      const data = project(part, part.messageID);
+      if (data) rows.set(data.key, { data, live: true, revision: ++revision });
+      else if (part.messageID && (part.id || part.callID)) {
+        const key = JSON.stringify([part.messageID, part.id || part.callID]);
+        // Suppress the prior content immediately, including against a read already in flight.
+        if (rows.has(key) || part.type === 'reasoning') rows.set(key, { revision: ++revision });
+      }
+    },
+    disconnect() { for (const item of rows.values()) if (item.live) { item.live = false; item.lastSeen = true; } },
+    view() { return { loaded, rows: Array.from(rows.values()).filter(item => item.data).reverse() }; }
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = { ...SeneschalChart, createChatProgress };
 (() => {
   'use strict';
   if (typeof document === 'undefined') return;
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const t = value => window.SeneschalI18n?.t(value) || value;
   const count = value => typeof value === 'number' && Number.isFinite(value) ? (window.SeneschalI18n?.number(value) || value.toLocaleString()) : 'Unavailable';
   const cost = value => typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(2) : 'Unavailable';
   const date = value => value && Number.isFinite(new Date(value).getTime()) ? (window.SeneschalI18n?.date(value, { dateStyle: 'medium', timeStyle: 'short' }) || new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })) : 'Not recorded';
@@ -42,7 +106,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SeneschalC
   function waitingForHost() {
     return empty('Waiting for PC history', 'On your PC, open Activity → Service and enable “Start Activity with Seneschal”. Prepare local history once on the PC if needed. This phone will load the dashboard when the service is available.', '<button type="button" class="secondary-button" data-action="check-host">Check PC status</button>');
   }
-  try { state.currentChat = localStorage.getItem('atelier-session') || ''; } catch {}
+  const progress = createChatProgress();
   const captured = new Map();
   let pausedCapture = null;
   let opener, returnModal = null, refreshTimer, liveTimer, searchTimer, refreshBusy = false, bootPromise, lastReconcile = 0;
@@ -251,13 +315,20 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SeneschalC
   }
   function liveHTML(sessionId = '') {
     const rows = liveRows(sessionId);
-    return rows.length ? rows.map(row => `<details class="activity-live-row" data-record="live:${escape(row.key)}"><summary><time>${date(row.time)}</time><strong>${escape(row.label)}</strong></summary><pre>${escape(row.text || 'Progress event recorded.')}</pre></details>`).join('') : '<p class="activity-caption">No live progress captured for this scope in this window.</p>';
+    return rows.length ? rows.map(row => `<details class="activity-live-row" data-record="live:${escape(row.key)}"><summary><time>${date(row.time)}</time><strong>${escape(t(row.label))}</strong></summary><pre>${escape(row.text || t('Progress event recorded.'))}</pre></details>`).join('') : `<p class="activity-caption">${escape(t('No live progress captured for this scope in this window.'))}</p>`;
   }
   function renderLive(force = false) {
+    if (chatActivity.open) renderChatProgress();
     if (state.paused && force !== true) return;
-    const chat = chatActivity.querySelector('.chat-activity-list');
-    if (chatActivity.open && !chat.contains(document.activeElement)) updateLive(chat, liveHTML(state.currentChat));
     if (dialog.open) for (const feed of content.querySelectorAll('.activity-live-feed')) if (!feed.contains(document.activeElement)) updateLive(feed, liveHTML(state.view === 'detail' ? state.detail?.sourceSessionId || '__unmapped__' : ''));
+  }
+  function renderChatProgress() {
+    const { rows, loaded } = progress.view();
+    const plan = rows.find(item => item.data.plan);
+    const origin = item => item.live ? 'Live' : item.lastSeen ? 'Last seen' : 'Restored';
+    const checklist = plan ? `<strong>${escape(t('Plan · ' + origin(plan)))}</strong><ol>${plan.data.plan.map(step => `<li>${escape(step.content)} <small>(${escape(t(step.status.replace('_',' ')))})</small></li>`).join('')}</ol>` : '';
+    const records = rows.map(item => `<li><small>${escape(t(origin(item)))}</small> · ${escape(item.data.label.startsWith('Sequential Thinking') || !item.data.status ? t(item.data.label) : item.data.label)}${item.data.status ? ` · ${!item.live && ['running','pending'].includes(item.data.status) ? escape(t('last recorded:')) + ' ' : ''}${escape(t(item.data.status))}` : `: ${escape(item.data.summary)}`}</li>`);
+    chatActivity.querySelector('.chat-activity-list').innerHTML = checklist + (records.length ? `<ul>${records.join('')}</ul>` : `<p>${escape(t(!state.currentChat ? 'Select a chat to see progress.' : loaded ? 'No recorded task activity.' : 'Waiting for session records.'))}</p>`);
   }
   function updateLive(container, html) {
     const expanded = new Set([...container.querySelectorAll('details[open]')].map(item => item.dataset.record));
@@ -429,16 +500,24 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SeneschalC
   chatActivity.addEventListener('toggle', renderLive);
   document.querySelector('#activityRailButton')?.addEventListener('click', event => open('overview', event.currentTarget));
   document.querySelector('#settingsTrailButton')?.addEventListener('click', event => open('overview', event.currentTarget));
-  window.addEventListener('seneschal-session-selected', event => { state.currentChat = event.detail || ''; renderLive(); });
+  window.addEventListener('seneschal-session-selected', event => {
+    if (state.currentChat === event.detail) return;
+    state.currentChat = event.detail || ''; progress.select(state.currentChat);
+    chatActivity.querySelector('.chat-activity-list').replaceChildren();
+    if (chatActivity.open) renderChatProgress();
+  });
   window.addEventListener('seneschal-activity', event => {
     const payload = event.detail || {}, props = payload.properties || {}, part = props.part || {};
     if (!payload.type || /heartbeat|server\.connected/.test(payload.type)) return;
+    if (payload.type === 'message.part.updated') progress.update(part);
     const sessionId = props.sessionID || part.sessionID || props.info?.sessionID || (payload.type.startsWith('session.') ? props.info?.id : '') || '';
     const partId = part.id || props.partID;
     const key = sessionId + ':' + (partId ? 'part:' + partId : payload.type + ':' + (props.info?.id || props.messageID || props.status?.type || 'progress'));
     const previous = captured.get(key);
+    if (payload.type === 'message.part.delta') return;
+    const sequential = /^sequential[_-]?thinking(?:[_-]sequential[_-]?thinking)?$/i.test(String(part.tool || ''));
     const label = part.type === 'tool' ? `${part.tool || 'Tool'} · ${part.state?.status || 'working'}` : part.type === 'reasoning' ? 'Reported reasoning summary' : previous?.label || payload.type.replaceAll('.', ' · ');
-    const text = payload.type === 'message.part.delta' ? (previous?.text || '') + (props.delta || '') : part.text || part.state?.output || part.state?.error || part.state?.title || props.status?.type || '';
+    const text = sequential ? 'Structured planning step' : part.type === 'reasoning' ? (!part.redacted && !part.isRedacted && !part.ignored && !part.metadata?.redacted ? (part.summary || (part.format === 'summary' ? part.text : '') || '') : '') : part.type === 'tool' ? (part.state?.status || '') : props.status?.type || '';
     captured.delete(key); captured.set(key, { key, sessionId, label, time: Date.now(), text: String(text).slice(-12000) });
     if (captured.size > 1000) captured.delete(captured.keys().next().value);
     clearTimeout(liveTimer); liveTimer = setTimeout(renderLive, 150);
@@ -447,6 +526,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SeneschalC
   window.addEventListener('beforeunload', () => { clearInterval(refreshTimer); clearTimeout(liveTimer); clearTimeout(searchTimer); });
   // Refresh formatted dates and counts locally; language changes never operate
   // the service or reload history. Preserve the current view, focus and scroll.
-  window.addEventListener('seneschal:languagechange', () => { if (dialog.open) render(true); });
-  window.SeneschalActivity = { open: button => open('overview', button), openSession };
+  window.addEventListener('seneschal:languagechange', () => { if (dialog.open) render(true); renderLive(true); });
+  window.SeneschalActivity = { open: button => open('overview', button), openSession,
+    revision: progress.revision,
+    restore(id, messages, since) { progress.restore(id, messages, since); if (chatActivity.open) renderChatProgress(); },
+    disconnect() { progress.disconnect(); if (chatActivity.open) renderChatProgress(); }
+  };
 })();

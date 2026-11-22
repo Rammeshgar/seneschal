@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
-const TARGETS = ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna',
+const TARGETS = ['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6.1-terra', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna',
   'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 const boolean = value => typeof value === 'boolean' ? value : null;
 function ids(value) {
@@ -100,3 +100,4 @@ if (require.main === module) main().catch(() => {
   process.stderr.write('Cannot inspect the local engine. Keep Seneschal running and use your normal PC terminal. No settings were changed.\n');
   process.exitCode = 1;
 });
+

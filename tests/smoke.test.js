@@ -81,7 +81,8 @@ test("public launch materials reference privacy-safe visual assets", () => {
   assert.match(readme, /assets\/social\/seneschal-social-preview\.png/);
   assert.match(readme, /docs\/images\/seneschal-workspace-night\.png/);
   assert.match(readme, /docs\/images\/seneschal-agent-board-night\.png/);
-  assert.match(readme, /privacy-safe (?:product illustration|screenshot)/);
+  // Require the privacy label on a workspace image, regardless of sentence case.
+  assert.match(readme, /!\[[^\]\n]*\bprivacy-safe (?:product illustration|screenshot)\b[^\]\n]*\]\(docs\/images\/seneschal-(?:workspace|agent-board)-night\.png\)/i);
   assert.ok(fs.existsSync(path.join(root, "assets/social/seneschal-linkedin-launch.png")));
 });
 
@@ -173,7 +174,7 @@ test("model choices are isolated per session and background work survives naviga
 test("current OpenAI models are registered with the engine, never fabricated in the picker", () => {
   const app = read("app/app.js");
   const server = read("server.js");
-  assert.match(app, /openai: \["gpt-6-astra", "gpt-6\.1-sol", "gpt-6-sol", "gpt-6-luna"/);
+  assert.match(app, /openai: \["gpt-6\.2-astra", "gpt-6\.2-sol", "gpt-6\.1-terra", "gpt-6-luna"/);
   assert.doesNotMatch(app, /providerModels\.push\(model\)/);
   assert.match(app, /const providerModels = Object\.values\(provider\.models \|\| \{\}\)/);
   assert.match(server, /registerOpenAIModel\("gpt-6\.1-sol", "GPT-6\.1 Sol"/);

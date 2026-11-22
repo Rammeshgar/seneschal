@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1-beta.21 — 2026-11-22
+
+- Restore task plans, observed tool activity and explicitly available reasoning summaries after a page refresh or reconnect; distinguish live, last-seen and restored records without duplicating private history.
+- Add GPT-6.2 Astra, GPT-6.2 Sol and GPT-6.1 Terra. Request optional faster provider processing independently of reasoning effort using synchronized lightning toggles in the header and composer.
+- Add optional local Sequential Thinking planning metadata and the opt-in Agenttrail map; preserve existing permissions and keep raw planning arguments out of the progress panel.
+- Translate new controls and progress states in English and Persian, with accessible toggles and responsive layouts.
+- Preserve the existing private-access qualification boundary: re-run isolated verification after updating protected source files before starting phone access.
+
 ## 0.2.1-beta.20 — 2026-11-01
 
 - Add a private, owner-paired Phone Access gateway with PC-only management, filtered routes, device revocation and source-hash qualification.

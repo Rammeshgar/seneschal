@@ -192,6 +192,10 @@ html[dir="rtl"] .activity-workspace :is(th,td,caption) { text-align: start; }
 .activity-live-row summary { font-size: 12px; }
 .activity-live-row time { color: var(--muted); margin-right: 12px; font-size: 11px; }
 .activity-live-row:last-child { border-bottom: 0; }
+.chat-activity-list { min-width: 0; max-height: min(28dvh, 18rem); overflow: auto; overflow-wrap: anywhere; }
+.chat-activity-list :is(ul,ol) { padding-inline-start: 1.4rem; margin: .4rem 0; }
+.chat-activity-list li { margin-block: .25rem; }
+.chat-activity-list small { color: var(--muted); }
 .activity-startup-option { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
 .activity-startup-option input { width: 20px; height: 20px; flex: none; accent-color: var(--forest); }
 .activity-startup-option:has(input:disabled) { cursor: default; }

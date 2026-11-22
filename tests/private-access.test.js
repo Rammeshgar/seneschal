@@ -1075,7 +1075,7 @@ test('new engine launches register current OpenAI models without Zen routing or 
   assert.deepEqual(config.permission, inherited.permission);
   assert.equal(config.model, inherited.model);
   assert.deepEqual(config.provider.openai.models.existing, inherited.provider.openai.models.existing);
-  const expectedWhitelist = [...inherited.provider.openai.whitelist, 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna'];
+  const expectedWhitelist = [...inherited.provider.openai.whitelist, 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6.1-terra'];
   assert.deepEqual(config.provider.openai.whitelist, expectedWhitelist);
   assert.deepEqual(config.provider.openai.blacklist, inherited.provider.openai.blacklist);
   context.content = JSON.stringify(config);
@@ -1084,13 +1084,19 @@ test('new engine launches register current OpenAI models without Zen routing or 
   assert.equal(Object.hasOwn(unrestricted.provider.openai, 'whitelist'), false);
   context.content = JSON.stringify({ provider: { openai: { whitelist: [] } } });
   assert.deepEqual(JSON.parse(vm.runInContext('openCodeModelLaunchConfig(content)', context, { timeout: 100 })).provider.openai.whitelist, expectedWhitelist.slice(3));
-  for (const id of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
+  for (const id of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6.1-terra']) {
     const model = config.provider.openai.models[id];
     assert.equal(model.tool_call, true); assert.equal(model.reasoning, true);
     assert.deepEqual(model.modalities, { input: ['text', 'image'], output: ['text'] });
     assert.equal(model.limit.context, 1050000); assert.equal(model.limit.output, 128000);
   }
   assert.equal(config.provider.openai.models['gpt-6.1-sol'].variants.none, undefined);
+  for (const id of ['gpt-6.2-astra','gpt-6.2-sol','gpt-6.1-terra']) {
+    const variants = config.provider.openai.models[id].variants;
+    assert.deepEqual(variants.high, { reasoningEffort:'high' });
+    assert.deepEqual(variants['fast-high'], { reasoningEffort:'high', serviceTier:'priority' });
+    assert.equal(variants['fast-none'] !== undefined, id === 'gpt-6.1-terra');
+  }
   assert.ok(config.provider.openai.models['gpt-6-luna'].variants.none);
   assert.equal(JSON.parse(vm.runInContext('openCodeModelLaunchConfig()', context, { timeout: 100 })).provider.openai.options, undefined);
   for (const bad of ['{', 'null', '[]', '{"provider":[]}', '{"provider":{"openai":{"models":[]}}}']) {

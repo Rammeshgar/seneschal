@@ -29,6 +29,7 @@
         </button>
 
         <div class="top-model">
+          <button type="button" id="fastModeButton" class="fast-mode-button" aria-label="Fast processing" aria-pressed="false" title="Fast processing · off" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 1.8 4 11h5.3l-.8 7.2L16 9h-5.3z"/></svg></button>
           <div class="model-select-wrap" id="modelPicker">
             <span class="provider-orb" id="providerOrb"></span>
             <button class="model-picker-button" id="modelPickerButton" type="button" aria-label="Select AI model" aria-haspopup="listbox" aria-expanded="false"><span id="modelPickerLabel" data-model-name="false">Select model</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button>
@@ -201,6 +202,7 @@
                 <div class="composer-tools" id="composerOptionsPanel" role="group" aria-label="Agent, thinking and skills">
                 <label class="select-wrap agent-select-wrap"><span>Agent</span><select id="agentSelect" aria-label="Agent mode"></select></label>
                 <label class="select-wrap agent-select-wrap model-variant-wrap" id="modelVariantWrap" hidden><span>Thinking</span><select id="modelVariantSelect" aria-label="Model thinking level"></select></label>
+                <button type="button" id="composerFastModeButton" class="fast-mode-button fast-mode-option" aria-label="Fast processing" aria-pressed="false" title="Fast processing · off" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 1.8 4 11h5.3l-.8 7.2L16 9h-5.3z"/></svg><span>Fast mode</span><small class="fast-mode-state" aria-hidden="true">Off</small></button>
                 <button class="skills-compose-button" id="skillsButton" type="button" title="Choose instructions and skills" aria-label="Open Instructions Studio"><svg viewBox="0 0 24 24"><path d="M7 3h10v5H7zM4 12h7v8H4zM14 12h6v8h-6z"/></svg><span>Skills</span><b id="activeSkillCount">0</b></button>
                 <span class="browser-compose-group"><button class="browser-compose-button" id="browserButton" type="button" title="Give the agent a browser task" aria-label="Open agent browser controls"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></svg><span>Browser</span></button><button class="browser-window-button" id="browserWindowButton" type="button" title="Show the agent-controlled Brave window" aria-label="Show the agent-controlled Brave window" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg><span>Show</span></button></span>
                 </div>

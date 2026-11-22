@@ -449,6 +449,7 @@
   }
 
   function setRecoveryStatus(kind) {
+    if (["offline", "reconnecting", "expired"].includes(kind)) window.SeneschalActivity?.disconnect?.();
     const messages = {
       offline: "Offline. PC tasks may still be running. Reconnecting when your connection returns…",
       reconnecting: "Reconnecting to the PC… Your messages will not be resent.",
@@ -1128,7 +1129,7 @@
     const connected = new Set(state.providers.connected || []);
     const curated = {
       google: ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash-lite"],
-      openai: ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+      openai: ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
       bonsai: ["ternary-bonsai-27b"],
       deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"]
     };
@@ -1308,14 +1309,37 @@
   function renderModelVariants() {
     const model = selectedModel();
     const variants = Object.keys(model?.variants || {});
-    els.modelVariantWrap.hidden = variants.length === 0;
-    if (!variants.length) { els.modelVariant.innerHTML = ""; return; }
+    const standard = variants.filter(variant => !/^fast-(none|low|medium|high|xhigh|max)$/.test(variant));
+    const fastButtons = [$("#fastModeButton"), $("#composerFastModeButton")].filter(Boolean);
+    els.modelVariantWrap.hidden = standard.length === 0;
+    if (!standard.length) { els.modelVariant.innerHTML = ""; fastButtons.forEach(button => { button.hidden = true; }); return; }
     const preferred = state.selectedVariants[model.value];
-    const selected = variants.includes(preferred) ? preferred : variants.includes("medium") ? "medium" : variants[0];
-    state.selectedVariants[model.value] = selected;
+    const base = String(preferred || "").replace(/^fast-/, "");
+    const selected = standard.includes(base) ? base : standard.includes("medium") ? "medium" : standard[0];
+    const availableFast = variants.includes("fast-" + selected);
+    const fastEnabled = availableFast && preferred === "fast-" + selected;
+    state.selectedVariants[model.value] = fastEnabled ? "fast-" + selected : selected;
     storage.set("atelier-model-variants", state.selectedVariants);
     const labels = { none: "None", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum", fast: "Fast", standard: "Standard" };
-    els.modelVariant.innerHTML = variants.map((variant) => `<option value="${escapeHTML(variant)}"${variant === selected ? " selected" : ""}>${escapeHTML(labels[variant] || variant)}</option>`).join("");
+    els.modelVariant.innerHTML = standard.map(variant => `<option value="${escapeHTML(variant)}"${variant === selected ? " selected" : ""}>${escapeHTML(labels[variant] || variant)}</option>`).join("");
+    els.modelVariant.title = "Choose model thinking effort.";
+    for (const fastButton of fastButtons) {
+      fastButton.hidden = !availableFast;
+      fastButton.setAttribute("aria-pressed", String(fastEnabled));
+      fastButton.title = fastEnabled ? "Fast processing · on (click to disable)" : "Fast processing · off (higher usage or cost may apply)";
+      const status = fastButton.querySelector(".fast-mode-state");
+      if (status) status.textContent = fastEnabled ? "On" : "Off";
+    }
+  }
+
+  function toggleFastMode() {
+    const model = selectedModel(); if (!model) return;
+    const base = els.modelVariant.value, variant = "fast-" + base;
+    if (!Object.hasOwn(model.variants || {}, variant)) return;
+    const enabled = state.selectedVariants[model.value] !== variant;
+    state.selectedVariants[model.value] = enabled ? variant : base;
+    renderModelVariants();
+    if (enabled) toast("Fast processing requested. Provider availability, usage limits and premium charges may apply.", "warn");
   }
 
   function renderModelCapability() {
@@ -2416,10 +2440,9 @@
   function runtimeInstructionSystem() {
     const data = state.instructionData;
     if (state.selectedAgent === "chat") return "Chat-only mode: respond conversationally using only the prompt and attached content. Do not invoke, request, or claim access to tools, files, commands, browsers, external services, Blender, or system actions. Be clear when an action requires switching to Build or Plan mode.";
-    if (!data) return "";
     const role = state.selectedAgent.includes("plan") ? "plan" : "build";
-    const sections = [];
-    const roleText = data.roles?.[role]?.trim();
+    const sections = ["For complex multi-step work, maintain a concise user-visible checklist using the available todo tool. Mark steps completed only after verification. When available, use Sequential Thinking selectively for difficult decisions or verification; supply brief shareable planning summaries, not private reasoning, secrets or sensitive content. Do not use it for simple questions or to circumvent approvals. Do not fabricate progress."];
+    const roleText = data?.roles?.[role]?.trim();
     if (roleText) sections.push(`Seneschal ${role} role instructions:\n${roleText}`);
     const skills = currentActiveSkills();
     if (skills.length) sections.push(`For this request, use the OpenCode skill tool to load and follow these exact skills: ${[...new Set(skills.map((skill) => skill.id))].join(", ")}.`);
@@ -2460,8 +2483,9 @@
 
   function renderTool(part) {
     const status = part.state?.status || "pending";
-    const title = part.state?.title || part.tool || "Tool";
-    const output = part.state?.output || part.state?.error || "";
+    const sequential = /^sequential[_-]?thinking(?:[_-]sequential[_-]?thinking)?$/i.test(String(part.tool || ''));
+    const title = sequential ? 'Structured planning step' : part.state?.title || part.tool || "Tool";
+    const output = sequential ? '' : part.state?.output || part.state?.error || "";
     const key = part.id || `${part.tool || "tool"}:${title}`;
     const remembered = state.toolDetails?.get(key);
     const toolName = String(part.tool || "tool").toLowerCase();
@@ -2946,6 +2970,7 @@
   }
 
   async function refreshMessages(scroll = false) {
+    const progressRevision = window.SeneschalActivity?.revision?.();
     const requestID = state.messageRefreshID = (state.messageRefreshID || 0) + 1;
     const session = selectedSession();
     if (!session) { state.messages = []; renderMessages(); return; }
@@ -2953,6 +2978,7 @@
       const messages = await api(`/session/${encodeURIComponent(session.id)}/message`, { directory: session.directory });
       if (requestID !== state.messageRefreshID || state.currentSessionID !== session.id) return;
       state.messages = messages;
+      window.SeneschalActivity?.restore?.(session.id, messages, progressRevision);
       renderMessages(scroll);
       renderUsage();
     } catch (error) { if (requestID === state.messageRefreshID && state.currentSessionID === session.id) toast(`Could not load messages: ${error.message}`, "error"); }
@@ -3515,6 +3541,7 @@
   }
 
   async function recoverConnectionState(signal) {
+    const progressRevision = window.SeneschalActivity?.revision?.();
     const sessionID = state.currentSessionID, directory = selectedSession()?.directory || state.currentDirectory;
     const revision = state.streamRevision || 0;
     const messageID = state.messageRefreshID = (state.messageRefreshID || 0) + 1;
@@ -3531,6 +3558,7 @@
     state.statuses = statuses;
     state.permissions = mergePermissionSnapshot(permissions, selectedSession());
     state.messages = messages;
+    window.SeneschalActivity?.restore?.(sessionID, messages, progressRevision);
     renderProjects(); renderSessions(); renderHeader(); renderUsage(); renderMessages(false); renderPermissions();
     window.dispatchEvent(new CustomEvent("seneschal-question-refresh"));
     return true;
@@ -4704,7 +4732,9 @@
     bindToolDisclosures();
     bindComposerOptions();
     bindAresAvailability();
-    els.modelVariant.addEventListener("change", () => { const model = selectedModel(); if (!model) return; state.selectedVariants[model.value] = els.modelVariant.value; storage.set("atelier-model-variants", state.selectedVariants); });
+    els.modelVariant.addEventListener("change", () => { const model = selectedModel(); if (!model) return; const base = els.modelVariant.value; const fast = String(state.selectedVariants[model.value] || "").startsWith("fast-"); state.selectedVariants[model.value] = fast && Object.hasOwn(model.variants || {}, "fast-" + base) ? "fast-" + base : base; renderModelVariants(); });
+    $("#fastModeButton")?.addEventListener("click", toggleFastMode);
+    $("#composerFastModeButton")?.addEventListener("click", toggleFastMode);
     els.agent.addEventListener("change", () => { state.selectedAgent = els.agent.value; storage.set("atelier-agent", state.selectedAgent); els.inspectorAgent.textContent = agentDisplayName(state.selectedAgent); renderInspector(); renderInstructionStack(); renderModelCapability(); if (state.selectedAgent === "chat") toast("Chat mode enabled. All tools and system actions are off."); });
     els.form.addEventListener("submit", (event) => { event.preventDefault(); sendPrompt(els.prompt.value); });
     els.prompt.addEventListener("input", () => {
@@ -6331,6 +6361,45 @@ Powered by Agent Trail|با پشتیبانی Agent Trail
 Local history|تاریخچهٔ محلی
 Inspect current chat|بررسی گفت‌وگوی فعلی
 Live agent activity|فعالیت زندهٔ عامل
+Fast mode|حالت سریع
+Fast processing|پردازش سریع
+Fast processing · off|پردازش سریع · خاموش
+Fast processing · on (click to disable)|پردازش سریع روشن است؛ برای خاموش کردن کلیک کنید
+Fast processing · off (higher usage or cost may apply)|پردازش سریع خاموش است؛ ممکن است مصرف یا هزینهٔ بیشتری داشته باشد
+Fast processing requested. Provider availability, usage limits and premium charges may apply.|پردازش سریع درخواست شد. دسترسی ارائه‌دهنده، محدودیت مصرف و هزینهٔ بیشتر ممکن است اعمال شود.
+Choose model thinking effort.|میزان بررسی مدل را انتخاب کنید.
+Observed plan, model updates and tools|برنامه، به‌روزرسانی‌های مدل و ابزارهای مشاهده‌شده
+Agent-reported plan|برنامهٔ گزارش‌شدهٔ عامل
+Live Agenttrail Map ↗|نقشهٔ زندهٔ Agenttrail ↗
+Sequential Thinking|تفکر گام‌به‌گام
+Structured planning tool|ابزار برنامه‌ریزی ساختاریافته
+Structured planning step|گام برنامه‌ریزی ساختاریافته
+Reconsidering an earlier step|بازبینی گام قبلی
+Further review requested|بررسی بیشتر درخواست شد
+Tool reported no further steps needed|ابزار اعلام کرد گام دیگری لازم نیست
+Reported reasoning summary|خلاصهٔ بررسی گزارش‌شده
+Reasoning summary|خلاصهٔ بررسی
+Recorded structured planning call. Raw planning arguments are not displayed.|اجرای ثبت‌شدهٔ برنامه‌ریزی ساختاریافته. ورودی خام برنامه‌ریزی نمایش داده نمی‌شود.
+Working|در حال کار
+Cancelled|لغوشده
+Observed activity|فعالیت مشاهده‌شده
+No activity yet|هنوز فعالیتی وجود ندارد
+Select a chat|یک گفت‌وگو انتخاب کنید
+Select a chat to see progress.|برای مشاهدهٔ پیشرفت یک گفت‌وگو انتخاب کنید.
+No recorded task activity.|فعالیت ثبت‌شده‌ای وجود ندارد.
+Waiting for session records.|در انتظار سوابق گفت‌وگو.
+Last seen|آخرین وضعیت مشاهده‌شده
+Restored|بازیابی‌شده
+last recorded:|آخرین وضعیت ثبت‌شده:
+in progress|در حال انجام
+unknown|نامشخص
+Status|وضعیت
+Planning|برنامه‌ریزی
+Tool|ابزار
+Model update|به‌روزرسانی مدل
+Progress event recorded.|رویداد پیشرفت ثبت شد.
+No live progress captured for this scope in this window.|در این پنجره پیشرفت زنده‌ای برای این بخش ثبت نشده است.
+Only reported updates and observed actions; private model reasoning is not available.|فقط به‌روزرسانی‌های گزارش‌شده و اقدامات مشاهده‌شده؛ استدلال خصوصی مدل در دسترس نیست.
 Latest progress for this chat|آخرین پیشرفت این گفت‌وگو
 Inspect history|بررسی تاریخچه
 History ready|تاریخچه آماده است
@@ -6763,6 +6832,11 @@ Startup preferences and service controls are managed on your PC. Your private co
   const number = (value, options) => new Intl.NumberFormat(languages[language].locale, options).format(value);
   const date = (value, options) => new Intl.DateTimeFormat(languages[language].locale, options).format(new Date(value));
   const patterns = [
+    [/^(\d+)\s*\/\s*(\d+) (?:steps )?complete$/, (done,total) => `${number(Number(done))} از ${number(Number(total))} گام انجام شده`],
+    [/^(Working|Retrying|Idle|Observed activity|No activity yet) · (\d+)\/(\d+) steps complete$/, (status,done,total) => `${t(status)} · ${number(Number(done))} از ${number(Number(total))} گام انجام شده`],
+    [/^Planning step (\d+)(?: of (\d+) \(estimated\))?(.*)$/, (step,total,tail) => `گام برنامه‌ریزی ${number(Number(step))}${total ? ' از ' + number(Number(total)) + ' (برآورد)' : ''}${tail.split(' · ').filter(Boolean).map(item => ' · ' + t(item)).join('')}`],
+    [/^Sequential Thinking(?: · Step (\d+)(?: of (\d+) \(estimate\))?)?(?: · (revision|pending|running|completed|error|cancelled|working))?$/, (step,total,status) => `تفکر گام‌به‌گام${step ? ' · گام ' + number(Number(step)) : ''}${total ? ' از ' + number(Number(total)) + ' (برآورد)' : ''}${status ? ' · ' + (status === 'revision' ? 'بازبینی' : t(status)) : ''}`],
+    [/^Plan · (Live|Last seen|Restored)$/, status => 'برنامه · ' + t(status)],
     [/^Last indexed (.+?)( · Coverage may be incomplete)?$/, (when, partial) => `آخرین فهرست‌سازی: ${when}${partial ? ' · ممکن است بخشی از سوابق هنوز آماده نباشد' : ''}`],
     [/^([1-6])\. (.+)$/, (n, label) => t(label) === label ? `${n}. ${label}` : `${number(Number(n))}. ${t(label)}`],
     [/^(.+) · (triggered|still-frame result; motion remains paused|click or use the matching number)$/, (label, state) => {

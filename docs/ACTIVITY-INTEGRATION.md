@@ -1,11 +1,17 @@
 # Native Activity workspace
 
+For supported GPT models, the lightning button next to the model independently enables Fast processing at the selected Thinking effort. The button is filled when enabled; the Thinking list contains only reasoning levels. Fast variants request the provider's priority service tier; Standard is the default. Provider entitlement and premium usage or pricing apply. Selecting Fast is not proof of the actual service tier used; the provider may decline or downgrade the request.
+
+Sequential Thinking is optional. Install the official pinned `@modelcontextprotocol/server-sequential-thinking@2.1.1` and Node `24.22.3` into the WSL-accessible `local-runtime/sequential-thinking` folder (for example `npm install --prefix local-runtime/sequential-thinking --save-exact node@24.22.3 @modelcontextprotocol/server-sequential-thinking@2.1.1` from WSL). Use its `node_modules/node/bin/node` to run `scripts/configure-sequential-thinking.cjs --enable` from WSL. This verifies the tool before adding a single OpenCode MCP entry, backs up the existing config, disables thought logging, and preserves permission settings. Restart only when active tasks finish. The runtime is not bundled. The activity panel shows numbered planning metadata, not raw thinking arguments, and restores it using existing session records.
+
 Seneschal owns the interface; Agent Trail 0.1.7 remains the local parser, history store, and usage engine. No iframe or fork of Agent Trail's Next.js interface is needed for the native views.
 
 ## Views and entry points
 
 - Sidebar Activity and Settings → Agent activity open Overview.
 - Live activity's Inspect history and Agent Board's Activity shortcut map an OpenCode session ID to its canonical indexed session.
+- In the chat composer, **Live agent activity** uses the selected chat's existing OpenCode message read. The latest successful checklist update supplies the plan; tool calls retain their recorded outcomes. Reasoning appears only when a summary is identifiable. Tool arguments and results are excluded from this panel.
+- **Live** means an update arrived in this window. **Last seen** marks that update after a disconnect. **Restored** means the status came from a session record; “last recorded: running” does not confirm the tool is still running. Selecting another chat clears the panel before its records arrive. This works without the Activity index and does not add restored records to live exports.
 - Overview: period totals, daily token trend, recent sessions, window-scoped live progress, pause, and JSON export.
 - Sessions: metadata search, recorded-status filter, conversation-text search (up to 50 matches), project drill-down from Usage, pagination, and worker sessions.
 - Replay: safe Markdown, independently expandable tool arguments/results, partial-record notices, parent/child navigation, incremental turn loading, and Open chat. Historical inspection never runs tools or replays actions.
